@@ -1,5 +1,7 @@
 import type { ColumnType, Generated, JSONColumnType } from 'kysely'
 import type {
+  AgentRunStatus,
+  AgentStepKind,
   Citation,
   CollectionRole,
   CollectionSettings,
@@ -134,6 +136,32 @@ export interface MessagesTable {
   created_at: CreatedAt
 }
 
+export interface AgentRunsTable {
+  id: string
+  conversation_id: string
+  message_id: ColumnType<string | null, string | null | undefined, string | null>
+  agent_name: string
+  status: ColumnType<AgentRunStatus, AgentRunStatus | undefined, AgentRunStatus>
+  input: string
+  error: ColumnType<string | null, string | null | undefined, string | null>
+  created_at: CreatedAt
+  updated_at: UpdatedAt
+}
+
+/** 执行轨迹（append-only）。input/output 为 jsonb，插入时显式 JSON.stringify。 */
+export interface AgentStepsTable {
+  id: string
+  run_id: string
+  seq: number
+  kind: AgentStepKind
+  name: ColumnType<string | null, string | null | undefined, never>
+  // jsonb：selectable 为 pg 解析后的任意 JSON 值，insertable 为 JSON.stringify 串（或 null）。
+  input: ColumnType<unknown, string | null | undefined, never>
+  output: ColumnType<unknown, string | null | undefined, never>
+  error: ColumnType<string | null, string | null | undefined, never>
+  created_at: CreatedAt
+}
+
 /** Kysely 数据库契约：表名 → 行类型。 */
 export interface Database {
   users: UsersTable
@@ -146,6 +174,8 @@ export interface Database {
   chunk_embeddings: ChunkEmbeddingsTable
   conversations: ConversationsTable
   messages: MessagesTable
+  agent_runs: AgentRunsTable
+  agent_steps: AgentStepsTable
 }
 
 export type { Generated }

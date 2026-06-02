@@ -49,6 +49,47 @@ export interface RerankHit {
   score: number
 }
 
+/** 工具描述符（喂给 function-calling；parameters 为 JSON Schema）。 */
+export interface ToolSpec {
+  name: string
+  description: string
+  parameters: unknown
+}
+
+/** 模型回填的一次工具调用（arguments 已 JSON.parse）。 */
+export interface ToolCall {
+  id: string
+  name: string
+  arguments: unknown
+}
+
+/**
+ * ReAct 循环的历史消息。比 ChatMessage 多 assistant 的 toolCalls 与 tool 角色，
+ * 仅 agent 路径（generateStream）用；text/textStream/object 仍用 ChatMessage。
+ */
+export type AgentTurnMessage =
+  | { role: 'system' | 'user'; content: string }
+  | { role: 'assistant'; content?: string; toolCalls?: ToolCall[] }
+  | { role: 'tool'; toolCallId: string; content: string }
+
+/**
+ * generateStream 的增量分段：
+ * - reasoning/text：思考/正文 token；
+ * - tool_calls：本轮模型决定调的工具（finish_reason==='tool_calls' 时累积完整后一次性 yield）。
+ */
+export type AgentChunk =
+  | { type: 'reasoning'; delta: string }
+  | { type: 'text'; delta: string }
+  | { type: 'tool_calls'; calls: ToolCall[] }
+
+export interface GenerateOptions {
+  messages: AgentTurnMessage[]
+  tools: ToolSpec[]
+  thinking?: boolean
+  temperature?: number
+  maxTokens?: number
+}
+
 /**
  * ① 能力层（chat 侧）：所有 chat 供应商收敛到这一组能力。
  * zod 是结构化输出的单一真相源（z.infer 类型 + 转 JSON Schema + 运行期校验）。
@@ -58,6 +99,8 @@ export interface LLMCapability {
   text(opts: TextOptions): Promise<string>
   textStream(opts: TextOptions): AsyncIterable<StreamChunk>
   object<T>(schema: z.ZodType<T>, opts: ObjectOptions): Promise<T>
+  /** ReAct tool-calling 原语：流式产 reasoning/text，并在模型决定调工具时产 tool_calls。 */
+  generateStream(opts: GenerateOptions): AsyncIterable<AgentChunk>
 }
 
 /**

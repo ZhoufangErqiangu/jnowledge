@@ -440,6 +440,62 @@ packages/shared/src/
 
 ---
 
+## 13. 四期切片执行计划（Phase 4 起步 — Agent Runtime 底座 + RAG 工具化 + Agent SSE）
+
+本切片落 Agent 底座，刻意**不上 C 档 Orchestrator**（留下期）。锁定决策：① 底座 + RAG 封工具；
+② 新增独立 agent 端点，现有 `/ask` 不动；③ 两层工具 primitive+composite；④ 建表 + 落轨迹，
+**续跑(resume) 留下期**；⑤ 中间决策步不流 token，仅最终答复流 token；⑥ 复用 conversations/messages，
+终答落 messages、轨迹落 agent_steps。**本期 agent 代码定义（组合根注册，不做 CRUD 实体）。**
+
+### 13.1 agent 的定义（校准）
+agent = 受约束的控制循环：目标 + 一组手段(affordances) + 约束(prompt 软约束 + 代码硬围栏 + 熔断)，
+由「决策策略」反复选下一步直到终止。**自主度是节点属性而非系统属性**：B 档=写死的边（RAG 流水线，零自主），
+ReAct=LLM 在工具集里选（中），C 档=Orchestrator 选边（有界高）。原则：**能确定就别自主**。
+
+### 13.2 LLM 能力层：tool-calling 原语 ✅（唯一新基建）
+`LLMCapability.generateStream({messages, tools})` 产 `AgentChunk`（reasoning/text/tool_calls）。
+`openaiAdapter` 加 `toApiMessages`（AgentTurnMessage→OpenAI 形状，含 assistant.tool_calls / tool 角色）
++ `parseToolStream`（累积 `delta.tool_calls[].function.arguments` 分片，结束时拼齐 yield）。
+天然满足决策⑤：调工具的 turn 只产 tool_calls，最终 turn 才流 text。
+
+### 13.3 两层工具框架 ✅
+`Tool = {name, description, paramsSchema(zod), tier?, handler}`；`paramsSchema` 复用 `z.toJSONSchema` 喂模型
++ 调 handler 前 `safeParse` 校验回填参数（失败回喂模型纠正）。唯一 `ToolRegistry`（`createToolRegistry`）
+组合根构建；agent 按 `toolNames`「**授予**」可见子集（非共享工具箱）。
+- composite：`knowledge_search` 包整条 `retrieval.retrieve`（不改检索逻辑），命中以全局 marker 进 `ctx.citations`，输出带 [序号]。
+- primitive：`get_document`（受 ctx.collectionId 范围约束，最小权限示例）。
+
+### 13.4 Agent Runtime ✅
+`runAgent(def, input, ctx)` 标准 ReAct 循环，产 `AgentEvent`（step_start/tool_result/reasoning/text/final/error）。
+**四重熔断**：maxSteps / MAX_AGENT_DEPTH(防 agent-as-tool 递归) / charBudget(近似 token) / deadline(wall-clock)。
+`agentAsTool(def)` 把子 agent 包成工具（depth+1、消息隔离）——本期**留接口**，未注册第二个 agent。
+Runtime 是 infra 纯机制；工具接线由 domain/agent.service 用其依赖完成（避免 infra 反向依赖 domain）。
+
+### 13.5 持久化（migration 003）✅
+`agent_runs`（绑 conversation，message_id 完成回填，status running|completed|failed）+
+`agent_steps`（append-only 轨迹，input/output jsonb，与 SSE 事件同形）。repo/mapper 照既有惯例。
+
+### 13.6 service + controller ✅
+`domain/agent.service.ts`：鉴权(viewer) → 落 user 消息 → 建 run → 跑 `runAgent` → 翻 `AgentEvent` 成
+`AgentStreamEvent` + 落 steps + 聚合 citations → 终答落 messages + complete run。
+`!llm.configured` 降级直接列检索片段（对齐 chat.service）。`controllers/agent.controller.ts`：
+`POST /conversations/:id/agent`（SSE），复用 chat.controller 的 `ctx.respond=false` 传输层。
+
+### 13.7 共享契约 ✅
+`schemas/agent.ts`：`AgentRun`/`AgentStep`/`agentAskRequest` + `AgentStreamEvent`(ChatStreamEvent 超集)；
+`enums.ts` 加 `AGENT_RUN_STATUSES`/`AGENT_STEP_KINDS`；补齐 types barrel 的 chat/agent 导出。
+
+### 13.8 前端 ✅
+`apis/sse.ts` 抽出通用 SSE 读流（chat/agent 共用）；`apis/agent.ts`；`stores/chat` 加 `agentMode` + `streamSteps`；
+`ChatView` 加 RAG/Agent 开关 + 流式期间可折叠执行轨迹。引用复用既有跳 DocumentDetail 高亮。
+
+### 四期切片完成标准（DoD）
+typecheck/lint/web build 全绿；migration 003 up/down 干净；**无 key 降级路径端到端实测通过**
+（鉴权→落 user 消息→SSE token/citations/done→agent_runs=completed 且回填 message_id）。
+填 key 后联调（待）：需检索问题出 step_start→tool_result→citations→流式 token 轨迹；闲聊不检索；熔断 → run=failed。
+
+---
+
 ## 待定项
 
 - ~~部署形态~~ → **自托管 PG 确定**（镜像/容器在己方控制，可装扩展；同利好三期 AGE）。

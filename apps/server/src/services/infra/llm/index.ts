@@ -21,6 +21,10 @@ function unconfiguredCapability(): LLMCapability {
     async object() {
       return fail()
     },
+    async *generateStream() {
+      fail()
+      yield { type: 'text' as const, delta: '' } // 不可达：fail() 抛错，仅为满足 generator 语法
+    },
   }
 }
 

@@ -1,11 +1,15 @@
 import { z } from 'zod'
 import type {
+  AgentChunk,
+  AgentTurnMessage,
   ChatMessage,
+  GenerateOptions,
   LLMCapability,
   ObjectOptions,
   RerankHit,
   StreamChunk,
   TextOptions,
+  ToolCall,
 } from './types.js'
 import { LlmError } from './types.js'
 
@@ -116,7 +120,10 @@ export function createChatCapability(cfg: ChatAdapterConfig): LLMCapability {
             model: opts.model ?? cfg.model,
             messages,
             response_format: useStrict
-              ? { type: 'json_schema', json_schema: { name: 'result', schema: jsonSchema, strict: true } }
+              ? {
+                  type: 'json_schema',
+                  json_schema: { name: 'result', schema: jsonSchema, strict: true },
+                }
               : { type: 'json_object' },
             ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
           })
@@ -147,7 +154,49 @@ export function createChatCapability(cfg: ChatAdapterConfig): LLMCapability {
       }
       throw new LlmError(`结构化输出校验失败（已重试 ${maxRepair} 次）：${lastErr}`, 'validation')
     },
+
+    async *generateStream(opts: GenerateOptions): AsyncIterable<AgentChunk> {
+      const res = await rawChat({
+        model: cfg.model,
+        messages: toApiMessages(opts.messages),
+        tools: opts.tools.map((t) => ({
+          type: 'function',
+          function: { name: t.name, description: t.description, parameters: t.parameters },
+        })),
+        tool_choice: 'auto',
+        stream: true,
+        ...(opts.thinking ? { [cfg.thinkingField]: { type: 'enabled' } } : {}),
+        ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
+        ...(opts.maxTokens !== undefined ? { max_tokens: opts.maxTokens } : {}),
+      })
+      if (!res.body) throw new LlmError('流式响应无 body', 'provider')
+      yield* parseToolStream(res.body)
+    },
   }
+}
+
+/** AgentTurnMessage[] → OpenAI chat messages 形状（含 assistant.tool_calls / tool 角色）。 */
+function toApiMessages(messages: AgentTurnMessage[]): Record<string, unknown>[] {
+  return messages.map((m) => {
+    if (m.role === 'tool') {
+      return { role: 'tool', tool_call_id: m.toolCallId, content: m.content }
+    }
+    if (m.role === 'assistant') {
+      if (m.toolCalls && m.toolCalls.length > 0) {
+        return {
+          role: 'assistant',
+          content: m.content ?? '',
+          tool_calls: m.toolCalls.map((tc) => ({
+            id: tc.id,
+            type: 'function',
+            function: { name: tc.name, arguments: JSON.stringify(tc.arguments ?? {}) },
+          })),
+        }
+      }
+      return { role: 'assistant', content: m.content ?? '' }
+    }
+    return { role: m.role, content: m.content }
+  })
 }
 
 /** SiliconFlow / OpenAI 兼容 embedding。 */
@@ -204,7 +253,11 @@ export function createReranker(cfg: RerankAdapterConfig) {
 }
 
 /** 把 JSON Schema 文本作为系统约束注入消息（json_object 降级路径用）。 */
-function injectSchema(messages: ChatMessage[], schemaText: string, repairErr?: string): ChatMessage[] {
+function injectSchema(
+  messages: ChatMessage[],
+  schemaText: string,
+  repairErr?: string,
+): ChatMessage[] {
   const lines = [
     '你必须只返回一个合法 JSON 对象，且严格符合以下 JSON Schema；不要输出任何解释、注释或 markdown 代码块。',
     `JSON Schema: ${schemaText}`,
@@ -226,11 +279,79 @@ interface RerankResponse {
 
 function safeJsonParse(raw: string): { ok: true; value: unknown } | { ok: false } {
   // 容忍模型偶发的 ```json 包裹
-  const cleaned = raw.trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim()
+  const cleaned = raw
+    .trim()
+    .replace(/^```(?:json)?/i, '')
+    .replace(/```$/, '')
+    .trim()
   try {
     return { ok: true, value: JSON.parse(cleaned) }
   } catch {
     return { ok: false }
+  }
+}
+
+/**
+ * 解析带 tool-calling 的流：逐段 yield reasoning/text；累积 delta.tool_calls 分片，
+ * 流结束时（finish_reason==='tool_calls'）把每个 index 的 id/name/arguments 拼齐后一次性 yield。
+ */
+async function* parseToolStream(body: ReadableStream<Uint8Array>): AsyncIterable<AgentChunk> {
+  const reader = body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  // 按 tool_calls[].index 累积分片。
+  const acc = new Map<number, { id: string; name: string; args: string }>()
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() ?? ''
+    for (const line of lines) {
+      const trimmed = line.trim()
+      if (!trimmed.startsWith('data:')) continue
+      const data = trimmed.slice(5).trim()
+      if (data === '[DONE]') continue
+      try {
+        const json = JSON.parse(data) as {
+          choices?: {
+            delta?: {
+              content?: string
+              reasoning_content?: string
+              tool_calls?: {
+                index?: number
+                id?: string
+                function?: { name?: string; arguments?: string }
+              }[]
+            }
+          }[]
+        }
+        const delta = json.choices?.[0]?.delta
+        if (delta?.reasoning_content) yield { type: 'reasoning', delta: delta.reasoning_content }
+        if (delta?.content) yield { type: 'text', delta: delta.content }
+        if (delta?.tool_calls) {
+          for (const tc of delta.tool_calls) {
+            const idx = tc.index ?? 0
+            const cur = acc.get(idx) ?? { id: '', name: '', args: '' }
+            if (tc.id) cur.id = tc.id
+            if (tc.function?.name) cur.name = tc.function.name
+            if (tc.function?.arguments) cur.args += tc.function.arguments
+            acc.set(idx, cur)
+          }
+        }
+      } catch {
+        // 忽略心跳/不完整分片
+      }
+    }
+  }
+  if (acc.size > 0) {
+    const calls: ToolCall[] = [...acc.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([, c]) => {
+        const parsed = c.args ? safeJsonParse(c.args) : { ok: true as const, value: {} }
+        return { id: c.id, name: c.name, arguments: parsed.ok ? parsed.value : {} }
+      })
+    yield { type: 'tool_calls', calls }
   }
 }
 

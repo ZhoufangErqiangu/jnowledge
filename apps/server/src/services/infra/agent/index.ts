@@ -1,0 +1,11 @@
+/**
+ * Agent Runtime（infra）：通用 ReAct 循环 + 工具框架。是纯机制——
+ * 工具的注册与具体能力的接线由 domain/agent.service 用其依赖（retrieval/models）完成，
+ * 避免 infra 反向依赖 domain。
+ */
+export * from './types.js'
+export { runAgent } from './runtime.js'
+export { createToolRegistry } from './registry.js'
+export { agentAsTool } from './agentAsTool.js'
+export { createKnowledgeSearchTool } from './tools/knowledgeSearch.js'
+export { createGetDocumentTool } from './tools/getDocument.js'

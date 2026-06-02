@@ -57,3 +57,14 @@ export type LlmTier = (typeof LLM_TIERS)[number]
 /** 会话消息角色（二期 RAG 问答）。 */
 export const MESSAGE_ROLES = ['user', 'assistant'] as const
 export type MessageRole = (typeof MESSAGE_ROLES)[number]
+
+/**
+ * Agent 运行状态机（四期 Agent Runtime）。
+ * running → completed | failed；轨迹落 agent_runs/agent_steps（续跑能力留后续）。
+ */
+export const AGENT_RUN_STATUSES = ['running', 'completed', 'failed'] as const
+export type AgentRunStatus = (typeof AGENT_RUN_STATUSES)[number]
+
+/** Agent 执行轨迹步骤类型（tool=调工具，agent=调子 agent 作工具）。 */
+export const AGENT_STEP_KINDS = ['tool', 'agent'] as const
+export type AgentStepKind = (typeof AGENT_STEP_KINDS)[number]

@@ -1,4 +1,6 @@
 import type {
+  AgentRun,
+  AgentStep,
   Chunk,
   Collection,
   CollectionMember,
@@ -19,6 +21,8 @@ import type { DocumentVersionRow } from './documentVersion.repo.js'
 import type { ChunkRow } from './chunk.repo.js'
 import type { ConversationRow } from './conversation.repo.js'
 import type { MessageRow } from './message.repo.js'
+import type { AgentRunRow } from './agentRun.repo.js'
+import type { AgentStepRow } from './agentStep.repo.js'
 
 const iso = (d: Date): string => new Date(d).toISOString()
 
@@ -131,6 +135,35 @@ export function toMessage(r: MessageRow): Message {
     content: r.content,
     // jsonb 由 pg 解析为 JS；空表默认 []。
     citations: (r.citations ?? []) as Message['citations'],
+    createdAt: iso(r.created_at),
+  }
+}
+
+export function toAgentRun(r: AgentRunRow): AgentRun {
+  return {
+    id: r.id,
+    conversationId: r.conversation_id,
+    messageId: r.message_id,
+    agentName: r.agent_name,
+    status: r.status,
+    input: r.input,
+    error: r.error,
+    createdAt: iso(r.created_at),
+    updatedAt: iso(r.updated_at),
+  }
+}
+
+export function toAgentStep(r: AgentStepRow): AgentStep {
+  return {
+    id: r.id,
+    runId: r.run_id,
+    seq: r.seq,
+    kind: r.kind,
+    name: r.name,
+    // jsonb 由 pg 解析为 JS。
+    input: r.input ?? null,
+    output: r.output ?? null,
+    error: r.error,
     createdAt: iso(r.created_at),
   }
 }

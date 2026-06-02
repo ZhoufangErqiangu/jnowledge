@@ -8,6 +8,8 @@ import { createDocumentVersionRepo } from './documentVersion.repo.js'
 import { createChunkRepo } from './chunk.repo.js'
 import { createConversationRepo } from './conversation.repo.js'
 import { createMessageRepo } from './message.repo.js'
+import { createAgentRunRepo } from './agentRun.repo.js'
+import { createAgentStepRepo } from './agentStep.repo.js'
 
 /** 组合根用：把某个执行器（db 或事务 trx）绑成一组 repository。 */
 export function createModels(db: DB) {
@@ -21,6 +23,8 @@ export function createModels(db: DB) {
     chunks: createChunkRepo(db),
     conversations: createConversationRepo(db),
     messages: createMessageRepo(db),
+    agentRuns: createAgentRunRepo(db),
+    agentSteps: createAgentStepRepo(db),
   }
 }
 

@@ -32,9 +32,11 @@ function scrollToBottom() {
   })
 }
 // 消息或流式内容变化时滚到底。
-watch(() => [chat.messages.length, chat.streamText, chat.streamReasoning], scrollToBottom, {
-  deep: true,
-})
+watch(
+  () => [chat.messages.length, chat.streamText, chat.streamReasoning, chat.streamSteps.length],
+  scrollToBottom,
+  { deep: true },
+)
 
 async function selectConversation(id: string) {
   if (chat.streaming) return
@@ -87,7 +89,9 @@ function gotoCitation(c: Citation) {
           @click="selectConversation(cv.id)"
         >
           <span class="cv-title">{{ cv.title }}</span>
-          <el-button text size="small" type="danger" @click.stop="removeConversation(cv.id)">删</el-button>
+          <el-button text size="small" type="danger" @click.stop="removeConversation(cv.id)"
+            >删</el-button
+          >
         </li>
       </ul>
       <el-empty v-if="chat.conversations.length === 0" description="暂无会话" :image-size="60" />
@@ -117,6 +121,17 @@ function gotoCitation(c: Citation) {
         <!-- 流式草稿气泡 -->
         <div v-if="chat.streaming" class="msg assistant">
           <div class="bubble">
+            <!-- Agent 执行轨迹（仅 Agent 模式、流式期间展示） -->
+            <el-collapse v-if="chat.streamSteps.length" class="trace" :model-value="['t']">
+              <el-collapse-item name="t" :title="`执行轨迹（${chat.streamSteps.length} 步）`">
+                <div v-for="s in chat.streamSteps" :key="s.seq" class="trace-step">
+                  <el-tag size="small" :type="s.running ? 'info' : s.ok ? 'success' : 'danger'">
+                    {{ s.kind }}:{{ s.name }}
+                  </el-tag>
+                  <span class="trace-summary">{{ s.running ? '执行中…' : s.summary }}</span>
+                </div>
+              </el-collapse-item>
+            </el-collapse>
             <el-collapse v-if="chat.streamReasoning" class="reasoning">
               <el-collapse-item title="思考过程">
                 <pre class="reasoning-body">{{ chat.streamReasoning }}</pre>
@@ -152,7 +167,17 @@ function gotoCitation(c: Citation) {
           placeholder="输入问题，Enter 发送（Shift+Enter 换行）"
           @keydown.enter.exact.prevent="send"
         />
-        <el-button type="primary" :loading="chat.streaming" @click="send">发送</el-button>
+        <div class="composer-actions">
+          <el-switch
+            v-model="chat.agentMode"
+            :disabled="chat.streaming"
+            inline-prompt
+            active-text="Agent"
+            inactive-text="RAG"
+            title="Agent 模式：自主编排检索，展示执行轨迹"
+          />
+          <el-button type="primary" :loading="chat.streaming" @click="send">发送</el-button>
+        </div>
       </div>
     </el-card>
   </div>
@@ -238,6 +263,22 @@ function gotoCitation(c: Citation) {
 .cite {
   cursor: pointer;
 }
+.trace {
+  margin-bottom: 8px;
+}
+.trace-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+}
+.trace-summary {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .reasoning {
   margin-bottom: 8px;
 }
@@ -269,5 +310,11 @@ function gotoCitation(c: Citation) {
 }
 .composer :deep(.el-textarea) {
   flex: 1;
+}
+.composer-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
 }
 </style>
