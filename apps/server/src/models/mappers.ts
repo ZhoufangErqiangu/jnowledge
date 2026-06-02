@@ -2,10 +2,12 @@ import type {
   Chunk,
   Collection,
   CollectionMember,
+  Conversation,
   Document,
   DocumentVersion,
   DocumentVersionSummary,
   FileMeta,
+  Message,
   PublicUser,
 } from '@jnowledge/shared'
 import type { UserRow } from './user.repo.js'
@@ -15,6 +17,8 @@ import type { FileRow } from './file.repo.js'
 import type { DocumentRow } from './document.repo.js'
 import type { DocumentVersionRow } from './documentVersion.repo.js'
 import type { ChunkRow } from './chunk.repo.js'
+import type { ConversationRow } from './conversation.repo.js'
+import type { MessageRow } from './message.repo.js'
 
 const iso = (d: Date): string => new Date(d).toISOString()
 
@@ -105,5 +109,28 @@ export function toChunk(r: ChunkRow): Chunk {
     charStart: r.char_start,
     charEnd: r.char_end,
     headingPath: r.heading_path,
+  }
+}
+
+export function toConversation(r: ConversationRow): Conversation {
+  return {
+    id: r.id,
+    collectionId: r.collection_id,
+    title: r.title,
+    createdBy: r.created_by,
+    createdAt: iso(r.created_at),
+    updatedAt: iso(r.updated_at),
+  }
+}
+
+export function toMessage(r: MessageRow): Message {
+  return {
+    id: r.id,
+    conversationId: r.conversation_id,
+    role: r.role,
+    content: r.content,
+    // jsonb 由 pg 解析为 JS；空表默认 []。
+    citations: (r.citations ?? []) as Message['citations'],
+    createdAt: iso(r.created_at),
   }
 }

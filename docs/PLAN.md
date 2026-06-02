@@ -1,6 +1,6 @@
 # jnowledge 知识库系统 — 方案与一期计划
 
-> 状态：方案讨论已收敛，一期决策全部确定。本文件是项目的权威计划记录。
+> 状态：一期已实现并通过端到端验证；二期（RAG）方案收敛、基建打通、待开工。本文件是项目的权威计划记录。
 > 最后更新：2026-06-02
 
 ---
@@ -373,8 +373,77 @@ packages/shared/src/
 
 ---
 
-## 待定项（不阻塞一期开工）
+## 12. 二期执行计划（Phase 2 — 文档问答 RAG）
 
-- 部署形态（自托管 vs 托管云）——影响 AGE 可用性。
-- SSE 具体实现（二期问答时定）。
-- 中文分词器最终选型（二期接 FTS 时定）。
+> **状态：已实现（2026-06-02）。全仓 typecheck + lint 通过；后端流水线（FTS→RRF→小到大组装→SSE→引用落库）已无 key 实测端到端打通；向量/rerank/真生成路径已接线并类型校验，仅待填 `DEEPSEEK_API_KEY` / `SILICONFLOW_API_KEY` 联调。**
+> 目标：在一期 CRUD 底座上接入 RAG —— embedding 回填 + 中文全文检索 + **完整混合检索**（向量 + 全文 + RRF 融合 + rerank 精排）+ SSE 流式问答 + 引用溯源。抽象与表结构沿用一期预留，不返工。
+
+### 12.0 本期定型决策
+
+| 维度 | 决策 |
+|---|---|
+| chat/生成 供应商 | **DeepSeek 官方**（OpenAI 兼容）。模型 `deepseek-v4-flash` / `deepseek-v4-pro`（旧 `deepseek-chat`/`deepseek-reasoner` 为兼容别名）。两模型均支持 function calling + JSON + 上下文缓存 + thinking 开关。 |
+| embedding + rerank 供应商 | **SiliconFlow（硅基流动）**：`BAAI/bge-m3`（1024 维）+ `BAAI/bge-reranker-v2-m3`，免费、一个 key、OpenAI 兼容（rerank 为 Jina 形状 `/rerank`）。 |
+| tier→模型 | `heavy → v4-pro`，`standard / light / nano → v4-flash`。**是否开 thinking 由调用层每次决定**（`thinking?` 选项，默认关；`object()` 默认关求结构化稳定），不进 tier 配置。 |
+| 检索 | **完整混合**（一步到位，非分阶段）。 |
+| 入库 | 启用 **Contextual Retrieval**（每 chunk 生成定位上下文再 embed）。 |
+| 向量索引 | pgvector **HNSW + cosine**，`vector(1024)`。 |
+| 中文 FTS | **zhparser**（tsvector + ts_rank），自托管 PG 自构建镜像。 |
+
+### 12.1 基建（PG 扩展镜像）✅
+- [x] `infra/postgres/Dockerfile`：基于 `pgvector/pgvector:pg16`，源码编译 SCWS + zhparser。
+- [x] `docker-compose.yml`：postgres 由 `image` 改 `build: ./infra/postgres`。
+- [x] 验证：`vector 0.8.2` + `zhparser 2.3` 可启用、中文分词正确、cosine 距离正常；换基础镜像后 `REFRESH COLLATION VERSION` + `REINDEX` 消除 collation 警告。
+
+### 12.2 LLM 抽象改造 ✅
+- [x] `config.llm` 拆 `chat` / `embedding` / `rerank` 三套（+ `config.rag` 入库/检索参数）；`.env.example` 加 `DEEPSEEK_API_KEY` / `SILICONFLOW_API_KEY` 与各默认值。
+- [x] 能力层：`embed` / `rerank(query, docs, topN)` 提到 `LLMClient` 顶层（走 SiliconFlow）；`object()` 降级到 json_object 时**注入 JSON Schema 文本**；`TextOptions.thinking?` 透传；`textStream` 产出 `StreamChunk{type:'reasoning'|'text'}` 分两路。
+- [x] tier→模型 v4 映射（heavy=pro，余=flash）；thinking 开关字段名集中在 `config.llm.chat.thinkingField`（唯一待官方确认点）。
+
+### 12.3 数据层（migration 002）✅
+- [x] `CREATE EXTENSION vector / zhparser` + `chinese_zh` 配置（zhparser parser + 实词词性映射）。
+- [x] `chunk_embeddings`：`chunk_id / model / dim / embedding vector(1024)`，PK(chunk_id, model)，HNSW(cosine) 索引。
+- [x] `chunks` 加 `tsv` 生成列 + GIN 索引。
+- [x] `conversations` / `messages`（`messages.citations jsonb`，数组显式 `JSON.stringify`）。
+- [x] 各新表 model（repo + 行类型 + mapper）；migration 已对运行库实跑通过并校验对象。
+
+### 12.4 基础设施 service ✅
+- [x] `PgVectorStore`（pgvector + Kysely 原生 SQL，HNSW cosine 近邻；查询按 collection 当前版本作用域）。`createInfra` 接入 `db`。
+- [x] embedding 批量写入（`upsertMany` on conflict 覆盖）。
+- [x] rerank 收敛在 `LLMClient.rerank()`。
+
+### 12.5 入库流水线增强 ✅
+- [x] 接上 embedding 桩：`chunking` → 批量 embed → 写 `chunk_embeddings` → `ready`（未配置 embedding 则内部跳过，不阻塞 CRUD）。
+- [x] **Contextual Retrieval**：light 为每 chunk 生成定位上下文拼前缀再 embed；文档正文作稳定前缀走 DeepSeek 自动上下文缓存控成本；失败逐 chunk 回退无上下文。
+- [x] 存量重建：`embed:backfill` 脚本 + `backfillMissing()`（按当前版本补缺 embedding，不重跑解析/分块）。
+
+### 12.6 检索流水线（B 档静态图）✅
+- [x] query 改写（nano，结合最近会话历史消代）。
+- [x] 混合召回（并行）：向量（bge-m3 → HNSW）∥ 全文（zhparser tsvector + ts_rank，**OR 语义提升召回**）。
+- [x] RRF 融合（`1/(k+rank)`，免调参）。
+- [x] bge-reranker-v2-m3 精排 → topK（未配置则 RRF 次序兜底）。
+- [x] small-to-big 组装：按 `char_start/end` 回 `document_versions.content` 扩展上下文窗口。
+- [x] 生成（standard，`textStream`，系统提示要求带 `[n]` 引用标记；未配置生成模型则降级列出检索片段）。
+- [x] 引用校验：解析答案 `[n]` → 仅保留命中 → 落 `messages.citations`。
+
+### 12.7 Controllers + SSE ✅
+- [x] `chat.controller`：建会话 / 列表 / 详情 / 删除 / 提问（SSE）。ACL 复用 `CollectionService.assertRole`（viewer+）。
+- [x] SSE 手写（`ctx.respond=false` + `text/event-stream`：`token`/`reasoning` 增量 → `citations` → `done`/`error`；客户端断开即停）。
+
+### 12.8 前端 ✅
+- [x] 问答视图 `ChatView`：会话列表 + 消息流 + 流式打字（光标）+ 引用气泡（点开跳 `DocumentDetailView` 原文 tab 高亮，复用精确 char 偏移）。
+- [x] `chat` store + `apis/chat`（fetch 读 SSE 流）；`CollectionsView` 加「问答」入口、路由 `collections/:id/chat`。
+- [x] thinking 推理过程折叠展示（`el-collapse`）。
+
+### 二期完成标准（DoD）
+用户在某知识库内提问 → 系统混合检索（向量 + 中文全文）+ RRF + rerank 得到相关 chunk → 流式生成带引用标记的答案 → 点击引用跳转原文对应区间高亮。
+
+---
+
+## 待定项
+
+- ~~部署形态~~ → **自托管 PG 确定**（镜像/容器在己方控制，可装扩展；同利好三期 AGE）。
+- ~~SSE 具体实现~~ → 二期 Koa 手写 `text/event-stream`。
+- ~~中文分词器选型~~ → **zhparser** 确定（自构建镜像已验证）。
+- DeepSeek v4 的 thinking 开关具体 API 参数名 + 实时价格：实现时按官方 doc 现拉确认（绑定集中在配置，单点关注）。
+- 三期 AGE（图谱）镜像与 `GraphStore` 落地形态。

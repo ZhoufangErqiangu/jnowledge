@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import { uuidv7 } from 'uuidv7'
+import type { Config } from '../../../config/index.js'
 import type { DB } from '../../../db/index.js'
 import { createModels, type Models } from '../../../models/index.js'
 import type { Infra } from '../../infra/index.js'
@@ -7,6 +8,7 @@ import type { Logger } from '../../../logger.js'
 import type { IngestDocumentJob } from '../../infra/jobs.js'
 import { detectType, getParser, SUPPORTED_KINDS } from './parsers/index.js'
 import { chunkMarkdown, DEFAULT_CHUNK_PARAMS, type ChunkParams } from './chunker.js'
+import { createEmbeddingService, type EmbeddingService } from './embedding.js'
 
 export { sha256 }
 function sha256(data: string | Buffer): string {
@@ -14,6 +16,7 @@ function sha256(data: string | Buffer): string {
 }
 
 export interface IngestionDeps {
+  config: Config
   db: DB
   models: Models
   infra: Infra
@@ -27,10 +30,13 @@ export interface IngestionDeps {
 export interface IngestionService {
   /** worker 入口：处理一个摄取任务。 */
   run(job: IngestDocumentJob): Promise<void>
+  /** 暴露 embedding 服务，供存量重建脚本调用。 */
+  embedding: EmbeddingService
 }
 
 export function createIngestionService(deps: IngestionDeps): IngestionService {
-  const { db, models, infra, logger } = deps
+  const { config, db, models, infra, logger } = deps
+  const embedding = createEmbeddingService({ config, db, models, infra, logger })
 
   async function run(job: IngestDocumentJob): Promise<void> {
     const { documentId, fileId } = job
@@ -83,10 +89,12 @@ export function createIngestionService(deps: IngestionDeps): IngestionService {
         )
       })
 
-      // embedding 步骤一期留桩（无 LLM 依赖），直接置 ready。
+      // 向量化：Contextual Retrieval + 批量 embed + 写 chunk_embeddings。
+      // 未配置 embedding 供应商时内部跳过（检索无召回，但不阻塞 CRUD 闭环）。
       await models.documents.setStatus(documentId, 'embedding')
+      const embedded = await embedding.embedVersion(versionId)
       await models.documents.setStatus(documentId, 'ready')
-      logger.info({ documentId, chunks: pieces.length }, 'ingest 完成')
+      logger.info({ documentId, chunks: pieces.length, embedded }, 'ingest 完成')
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       logger.error({ documentId, err }, 'ingest 失败')
@@ -135,7 +143,7 @@ export function createIngestionService(deps: IngestionDeps): IngestionService {
     return DEFAULT_CHUNK_PARAMS
   }
 
-  return { run }
+  return { run, embedding }
 }
 
 export * from './parsers/index.js'

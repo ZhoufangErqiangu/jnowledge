@@ -1,10 +1,12 @@
 import type { ColumnType, Generated, JSONColumnType } from 'kysely'
 import type {
+  Citation,
   CollectionRole,
   CollectionSettings,
   ContentFormat,
   DocumentSourceType,
   DocumentStatus,
+  MessageRole,
   UserRole,
   UserStatus,
 } from '@jnowledge/shared'
@@ -99,6 +101,36 @@ export interface ChunksTable {
   char_end: number
   /** 章节路径，text[] */
   heading_path: ColumnType<string[], string[], string[]>
+  /** 中文全文检索向量（生成列，to_tsvector('chinese_zh', content)）。只读，禁插入。 */
+  tsv: ColumnType<string, never, never>
+  created_at: CreatedAt
+}
+
+/** chunk 向量：每 chunk × model 一条。embedding 以 pgvector 文本字面量收发（'[..]'）。 */
+export interface ChunkEmbeddingsTable {
+  chunk_id: string
+  model: string
+  dim: number
+  embedding: ColumnType<string, string, string>
+  created_at: CreatedAt
+}
+
+export interface ConversationsTable {
+  id: string
+  collection_id: string
+  title: string
+  created_by: string
+  created_at: CreatedAt
+  updated_at: UpdatedAt
+  deleted_at: DeletedAt
+}
+
+export interface MessagesTable {
+  id: string
+  conversation_id: string
+  role: MessageRole
+  content: string
+  citations: JSONColumnType<Citation[], Citation[] | string | undefined, Citation[] | string>
   created_at: CreatedAt
 }
 
@@ -111,6 +143,9 @@ export interface Database {
   documents: DocumentsTable
   document_versions: DocumentVersionsTable
   chunks: ChunksTable
+  chunk_embeddings: ChunkEmbeddingsTable
+  conversations: ConversationsTable
+  messages: MessagesTable
 }
 
 export type { Generated }

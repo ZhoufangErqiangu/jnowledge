@@ -53,3 +53,7 @@ export type ContentFormat = (typeof CONTENT_FORMATS)[number]
  */
 export const LLM_TIERS = ['heavy', 'standard', 'light', 'nano'] as const
 export type LlmTier = (typeof LLM_TIERS)[number]
+
+/** 会话消息角色（二期 RAG 问答）。 */
+export const MESSAGE_ROLES = ['user', 'assistant'] as const
+export type MessageRole = (typeof MESSAGE_ROLES)[number]

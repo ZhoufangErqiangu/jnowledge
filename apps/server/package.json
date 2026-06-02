@@ -10,7 +10,8 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "migrate": "tsx src/db/migrate.ts up",
-    "migrate:down": "tsx src/db/migrate.ts down"
+    "migrate:down": "tsx src/db/migrate.ts down",
+    "embed:backfill": "tsx src/scripts/backfillEmbeddings.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.726.1",

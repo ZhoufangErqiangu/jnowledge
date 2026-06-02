@@ -1,70 +1,89 @@
 import type { Config } from '../../../config/index.js'
 import type { LlmTier } from '@jnowledge/shared'
-import { createOpenAICapability } from './openaiAdapter.js'
+import { createChatCapability, createEmbedder, createReranker } from './openaiAdapter.js'
 import { type LLMCapability, type LLMClient, LlmError } from './types.js'
 
 export * from './types.js'
 
-/**
- * Tier → 模型绑定。一期集中在此处（业务代码永不出现模型名）。
- * 二期接 LLM 时再细分各 tier 的真实模型与默认参数。
- */
-const TIER_MODELS: Record<LlmTier, string> = {
-  heavy: 'gpt-4o',
-  standard: 'gpt-4o',
-  light: 'gpt-4o-mini',
-  nano: 'gpt-4o-mini',
-}
-
-const EMBEDDING_MODEL = 'text-embedding-3-small'
-
-/** 未配置供应商时的能力层：任何调用都给出清晰报错（CRUD 闭环不依赖 LLM）。 */
+/** 未配置 chat 供应商时的能力层：任何调用都给出清晰报错（CRUD 闭环不依赖 LLM）。 */
 function unconfiguredCapability(): LLMCapability {
   const fail = (): never => {
-    throw new LlmError('LLM 供应商未配置（设置 LLM_API_KEY）', 'unconfigured')
+    throw new LlmError('chat 供应商未配置（设置 DEEPSEEK_API_KEY）', 'unconfigured')
   }
   return {
     async text() {
       return fail()
     },
-    async *textStream(): AsyncIterable<string> {
+    async *textStream() {
       fail()
-      yield '' // 不可达：fail() 抛错，仅为满足 generator 语法
+      yield { type: 'text' as const, delta: '' } // 不可达：fail() 抛错，仅为满足 generator 语法
     },
     async object() {
-      return fail()
-    },
-    async embed() {
       return fail()
     },
   }
 }
 
 export function createLLMClient(config: Config): LLMClient {
-  const apiKey = config.llm.apiKey
-  const configured = Boolean(apiKey)
+  const { chat, embedding, rerank } = config.llm
+  const configured = Boolean(chat.apiKey)
+  const embeddingConfigured = Boolean(embedding.apiKey)
 
-  // 按 tier 懒建并缓存能力句柄。
-  const cache = new Map<LlmTier, LLMCapability>()
-
+  // 按 tier 懒建并缓存 chat 能力句柄。
+  const chatCache = new Map<LlmTier, LLMCapability>()
   function capabilityFor(tier: LlmTier): LLMCapability {
-    if (!apiKey) return unconfiguredCapability()
-    const cached = cache.get(tier)
+    if (!chat.apiKey) return unconfiguredCapability()
+    const cached = chatCache.get(tier)
     if (cached) return cached
-    const cap = createOpenAICapability({
-      apiKey,
-      baseUrl: config.llm.baseUrl,
-      model: TIER_MODELS[tier],
-      embeddingModel: EMBEDDING_MODEL,
+    const cap = createChatCapability({
+      apiKey: chat.apiKey,
+      baseUrl: chat.baseUrl,
+      model: chat.models[tier],
+      thinkingField: chat.thinkingField,
     })
-    cache.set(tier, cap)
+    chatCache.set(tier, cap)
     return cap
+  }
+
+  // embed / rerank 走 SiliconFlow 侧，懒建。
+  let embedder: ReturnType<typeof createEmbedder> | undefined
+  let reranker: ReturnType<typeof createReranker> | undefined
+  function embedderOf() {
+    if (!embedding.apiKey) {
+      throw new LlmError('embedding 供应商未配置（设置 SILICONFLOW_API_KEY）', 'unconfigured')
+    }
+    embedder ??= createEmbedder({
+      apiKey: embedding.apiKey,
+      baseUrl: embedding.baseUrl,
+      model: embedding.model,
+    })
+    return embedder
+  }
+  function rerankerOf() {
+    if (!rerank.apiKey) {
+      throw new LlmError('rerank 供应商未配置（设置 SILICONFLOW_API_KEY）', 'unconfigured')
+    }
+    reranker ??= createReranker({
+      apiKey: rerank.apiKey,
+      baseUrl: rerank.baseUrl,
+      model: rerank.model,
+    })
+    return reranker
   }
 
   return {
     configured,
+    embeddingConfigured,
+    embeddingModel: embedding.model,
+    embeddingDim: embedding.dim,
     tier(tier) {
       return capabilityFor(tier)
+    },
+    embed(input, opts) {
+      return embedderOf()(input, opts?.model)
+    },
+    rerank(query, documents, topN) {
+      return rerankerOf()(query, documents, topN)
     },
   }
 }

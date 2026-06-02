@@ -1,5 +1,6 @@
 import type { Migration } from 'kysely'
 import * as init from './001_init.js'
+import * as rag from './002_rag.js'
 
 /**
  * 显式迁移注册表（不做目录扫描，与全仓"显式注册"约定一致）。
@@ -7,4 +8,5 @@ import * as init from './001_init.js'
  */
 export const migrations: Record<string, Migration> = {
   '001_init': init,
+  '002_rag': rag,
 }

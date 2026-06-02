@@ -21,6 +21,11 @@ const router = createRouter({
           name: 'document',
           component: () => import('@/views/DocumentDetailView.vue'),
         },
+        {
+          path: 'collections/:collectionId/chat',
+          name: 'chat',
+          component: () => import('@/views/ChatView.vue'),
+        },
       ],
     },
   ],

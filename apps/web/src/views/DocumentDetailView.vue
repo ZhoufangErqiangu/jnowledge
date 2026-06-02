@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import type {
@@ -28,6 +28,27 @@ const saving = ref(false)
 // 选中版本的分块/全文
 const viewingVersion = ref<DocumentVersion | null>(null)
 const chunks = ref<Chunk[]>([])
+
+// 引用跳转：route.query.hl="start-end" 时在「原文」标签高亮该区间（复用一期精确 char 偏移）。
+const markEl = ref<HTMLElement | null>(null)
+const highlight = computed(() => {
+  const hl = route.query.hl as string | undefined
+  if (!hl) return null
+  const [s, e] = hl.split('-').map(Number)
+  if (Number.isNaN(s) || Number.isNaN(e)) return null
+  return { start: s, end: e }
+})
+const sourceParts = computed(() => {
+  const content = viewingVersion.value?.content
+  if (!content) return null
+  const h = highlight.value
+  if (!h) return { before: content, hit: '', after: '' }
+  return {
+    before: content.slice(0, h.start),
+    hit: content.slice(h.start, h.end),
+    after: content.slice(h.end),
+  }
+})
 
 async function loadAll() {
   try {
@@ -61,7 +82,16 @@ async function save() {
   }
 }
 
-onMounted(loadAll)
+onMounted(async () => {
+  await loadAll()
+  // 从引用跳转进入：定位到指定版本并切到「原文」高亮。
+  const v = route.query.version as string | undefined
+  if (v) {
+    await loadVersionChunks(v)
+    activeTab.value = 'source'
+    nextTick(() => markEl.value?.scrollIntoView({ block: 'center' }))
+  }
+})
 </script>
 
 <template>
@@ -104,6 +134,14 @@ onMounted(loadAll)
             <template #default="{ row }">{{ formatDate(row.createdAt) }}</template>
           </el-table-column>
         </el-table>
+      </el-tab-pane>
+
+      <!-- 原文（引用高亮） -->
+      <el-tab-pane label="原文" name="source">
+        <p v-if="viewingVersion" class="page-muted">版本 v{{ viewingVersion.versionNo }} 全文</p>
+        <pre v-if="sourceParts" class="source-body">{{ sourceParts.before
+          }}<mark v-if="sourceParts.hit" ref="markEl">{{ sourceParts.hit }}</mark>{{ sourceParts.after }}</pre>
+        <el-empty v-else description="暂无内容" />
       </el-tab-pane>
 
       <!-- 分块 -->
@@ -153,5 +191,17 @@ onMounted(loadAll)
   word-break: break-word;
   margin: 0;
   font-family: inherit;
+}
+.source-body {
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+  font-family: inherit;
+  line-height: 1.7;
+}
+.source-body mark {
+  background: var(--el-color-warning-light-5);
+  border-radius: 3px;
+  padding: 1px 2px;
 }
 </style>

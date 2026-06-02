@@ -5,6 +5,7 @@ import type { AppState } from '../http/state.js'
 import { createAuthController } from './auth.controller.js'
 import { createCollectionController } from './collection.controller.js'
 import { createDocumentController } from './document.controller.js'
+import { createChatController } from './chat.controller.js'
 
 /**
  * ★显式注册（硬约束）：禁止动态 require / fs 扫描。
@@ -14,6 +15,7 @@ const CONTROLLER_FACTORIES: ((c: Container) => Router<AppState>)[] = [
   createAuthController,
   createCollectionController,
   createDocumentController,
+  createChatController,
 ]
 
 export function registerControllers(app: Koa<AppState>, c: Container): void {
