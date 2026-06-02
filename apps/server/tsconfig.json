@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "./src",
+    "outDir": "./dist",
+    "noEmit": true,
+    "types": ["node"],
+    // koa/@koa 系列为 CommonJS `export =`，默认导入与 verbatimModuleSyntax 约束冲突；
+    // 后端运行时走 tsx/esbuild（自带 interop），故关闭该约束（保留 NodeNext 解析）。
+    "verbatimModuleSyntax": false
+  },
+  "include": ["src"]
+}
