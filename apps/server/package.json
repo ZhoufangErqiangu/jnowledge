@@ -5,7 +5,8 @@
   "type": "module",
   "exports": "./src/main.ts",
   "scripts": {
-    "dev": "tsx watch src/main.ts",
+    "dev": "node scripts/free-port.mjs 3000 && tsx watch src/main.ts",
+    "free-port": "node scripts/free-port.mjs 3000",
     "start": "node dist/main.js",
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
