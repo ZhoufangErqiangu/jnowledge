@@ -3,7 +3,15 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 
 // 后端代理目标：把 API 前缀转发到 Koa（默认 3000）。
-const API_PREFIXES = ['/health', '/auth', '/collections', '/documents', '/openapi.json', '/docs']
+const API_PREFIXES = [
+  '/health',
+  '/auth',
+  '/collections',
+  '/documents',
+  '/conversations',
+  '/openapi.json',
+  '/docs',
+]
 
 export default defineConfig({
   plugins: [vue()],

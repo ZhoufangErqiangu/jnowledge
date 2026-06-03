@@ -16,6 +16,11 @@ export const chatApi = {
     const { data } = await http.get<Conversation[]>(`/collections/${collectionId}/conversations`)
     return data
   },
+  /** 全局会话列表（不绑库，仅 agent 模式）。 */
+  async listGlobal(): Promise<Conversation[]> {
+    const { data } = await http.get<Conversation[]>('/conversations')
+    return data
+  },
   async detail(id: string): Promise<ConversationDetail> {
     const { data } = await http.get<ConversationDetail>(`/conversations/${id}`)
     return data

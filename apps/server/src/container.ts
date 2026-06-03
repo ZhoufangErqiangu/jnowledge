@@ -9,10 +9,7 @@ import {
   type CollectionService,
 } from './services/domain/collection.service.js'
 import { createDocumentService, type DocumentService } from './services/domain/document.service.js'
-import {
-  createIngestionService,
-  type IngestionService,
-} from './services/domain/ingestion/index.js'
+import { createIngestionService, type IngestionService } from './services/domain/ingestion/index.js'
 import { createRetrievalService, type RetrievalService } from './services/domain/retrieval.js'
 import { createChatService, type ChatService } from './services/domain/chat.service.js'
 import { createAgentService, type AgentService } from './services/domain/agent.service.js'
@@ -76,6 +73,7 @@ export function buildContainer(config: Config): Container {
     infra,
     logger,
     collectionService: collections,
+    documentService: documents,
     retrieval,
   })
 

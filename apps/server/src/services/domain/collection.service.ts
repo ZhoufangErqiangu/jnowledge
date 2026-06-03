@@ -33,6 +33,8 @@ export interface CollectionService {
   update(p: Principal, id: string, req: UpdateCollectionRequest): Promise<Collection>
   remove(p: Principal, id: string): Promise<void>
   getTree(p: Principal): Promise<CollectionTreeNode[]>
+  /** 请求者可访问的全部知识库（扁平列表，全局 agent 选库用）。 */
+  listAccessible(p: Principal): Promise<Collection[]>
   getById(p: Principal, id: string): Promise<Collection>
   /** 授权核心：要求请求者在该 collection 至少具备 minRole；否则抛 403/404。 */
   assertRole(p: Principal, id: string, minRole: CollectionRole): Promise<CollectionRow>
@@ -105,6 +107,11 @@ export function createCollectionService(deps: CollectionDeps): CollectionService
     async getById(p, id) {
       const row = await assertRole(p, id, 'viewer')
       return toCollection(row)
+    },
+
+    async listAccessible(p) {
+      const rows = await collections.listForUser(p.uid)
+      return rows.map(toCollection)
     },
 
     async getTree(p) {

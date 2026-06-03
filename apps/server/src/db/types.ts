@@ -36,7 +36,11 @@ export interface CollectionsTable {
   parent_id: ColumnType<string | null, string | null | undefined, string | null>
   owner_id: string
   description: ColumnType<string | null, string | null | undefined, string | null>
-  settings: JSONColumnType<CollectionSettings, CollectionSettings | string | undefined, CollectionSettings | string>
+  settings: JSONColumnType<
+    CollectionSettings,
+    CollectionSettings | string | undefined,
+    CollectionSettings | string
+  >
   created_by: string
   created_at: CreatedAt
   updated_at: UpdatedAt
@@ -119,7 +123,8 @@ export interface ChunkEmbeddingsTable {
 
 export interface ConversationsTable {
   id: string
-  collection_id: string
+  /** null = 全局会话（仅 agent，不绑知识库）。 */
+  collection_id: string | null
   title: string
   created_by: string
   created_at: CreatedAt
@@ -162,6 +167,24 @@ export interface AgentStepsTable {
   created_at: CreatedAt
 }
 
+/** 写操作两阶段确认的待确认记录。args 为工具入参快照（jsonb）。 */
+export interface PendingOperationsTable {
+  id: string
+  conversation_id: string
+  proposing_run_id: string
+  tool_name: string
+  args: JSONColumnType<Record<string, unknown>, Record<string, unknown> | string, never>
+  description: string
+  risk_reason: string
+  status: ColumnType<
+    'pending' | 'confirmed',
+    'pending' | 'confirmed' | undefined,
+    'pending' | 'confirmed'
+  >
+  created_at: CreatedAt
+  updated_at: UpdatedAt
+}
+
 /** Kysely 数据库契约：表名 → 行类型。 */
 export interface Database {
   users: UsersTable
@@ -176,6 +199,7 @@ export interface Database {
   messages: MessagesTable
   agent_runs: AgentRunsTable
   agent_steps: AgentStepsTable
+  pending_operations: PendingOperationsTable
 }
 
 export type { Generated }

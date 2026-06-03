@@ -56,6 +56,8 @@ export interface DocumentService {
   createManual(p: Principal, req: CreateDocumentRequest): Promise<Document>
   update(p: Principal, documentId: string, req: UpdateDocumentRequest): Promise<Document>
   upload(p: Principal, collectionId: string, file: UploadFile): Promise<Document>
+  /** 跨库移动文档（需对源库与目标库均有 editor 权限）。 */
+  move(p: Principal, documentId: string, targetCollectionId: string): Promise<Document>
   remove(p: Principal, documentId: string): Promise<void>
   listVersions(p: Principal, documentId: string): Promise<DocumentVersionSummary[]>
   getVersion(p: Principal, documentId: string, versionId: string): Promise<DocumentVersion>
@@ -78,7 +80,10 @@ export function createDocumentService(deps: DocumentDeps): DocumentService {
     return doc
   }
 
-  async function enqueueIngest(documentId: string, payload: { fileId?: string; versionId?: string }) {
+  async function enqueueIngest(
+    documentId: string,
+    payload: { fileId?: string; versionId?: string },
+  ) {
     await infra.jobs.enqueue(QUEUE_INGEST_DOCUMENT, { documentId, ...payload })
   }
 
@@ -98,9 +103,7 @@ export function createDocumentService(deps: DocumentDeps): DocumentService {
       const currentVersion = doc.current_version_id
         ? await models.documentVersions.findById(doc.current_version_id)
         : undefined
-      const chunkCount = currentVersion
-        ? await models.chunks.countByVersion(currentVersion.id)
-        : 0
+      const chunkCount = currentVersion ? await models.chunks.countByVersion(currentVersion.id) : 0
       return {
         document: toDocument(doc),
         currentVersion: currentVersion ? toDocumentVersion(currentVersion) : null,
@@ -179,7 +182,10 @@ export function createDocumentService(deps: DocumentDeps): DocumentService {
       // 魔数检测：早拒不支持类型（好 UX + 安全边界）
       const detected = await detectType(file.buffer)
       if (!SUPPORTED_KINDS.has(detected.kind)) {
-        throw new AppError(ERROR_CODES.UNSUPPORTED_FILE_TYPE, `不支持的文件类型: ${detected.mimeType}`)
+        throw new AppError(
+          ERROR_CODES.UNSUPPORTED_FILE_TYPE,
+          `不支持的文件类型: ${detected.mimeType}`,
+        )
       }
 
       const checksum = sha256(file.buffer)
@@ -214,6 +220,16 @@ export function createDocumentService(deps: DocumentDeps): DocumentService {
       await enqueueIngest(documentId, { fileId: fileRow.id })
       const doc = await models.documents.findById(documentId)
       return toDocument(doc!)
+    },
+
+    async move(p, documentId, targetCollectionId) {
+      const doc = await loadWithAccess(p, documentId, 'editor')
+      if (doc.collection_id === targetCollectionId) return toDocument(doc)
+      // 目标库也需 editor 权限（防把文档塞进无权库）。
+      await collectionService.assertRole(p, targetCollectionId, 'editor')
+      await models.documents.setCollection(documentId, targetCollectionId)
+      const fresh = await models.documents.findById(documentId)
+      return toDocument(fresh ?? doc)
     },
 
     async remove(p, documentId) {

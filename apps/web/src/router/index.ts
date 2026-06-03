@@ -22,6 +22,11 @@ const router = createRouter({
           component: () => import('@/views/DocumentDetailView.vue'),
         },
         {
+          path: 'chat',
+          name: 'global-chat',
+          component: () => import('@/views/ChatView.vue'),
+        },
+        {
           path: 'collections/:collectionId/chat',
           name: 'chat',
           component: () => import('@/views/ChatView.vue'),

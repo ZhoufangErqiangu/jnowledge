@@ -34,7 +34,8 @@ export type Message = z.infer<typeof messageSchema>
 
 export const conversationSchema = z.object({
   id: uuidSchema,
-  collectionId: uuidSchema,
+  /** 绑定的知识库 id；为 null 表示全局会话（仅 agent 模式，跨库检索）。 */
+  collectionId: uuidSchema.nullable(),
   title: z.string(),
   createdBy: uuidSchema,
   createdAt: isoDateSchema,
@@ -42,9 +43,12 @@ export const conversationSchema = z.object({
 })
 export type Conversation = z.infer<typeof conversationSchema>
 
-/** 新建会话（绑某知识库；标题可选，缺省由首条提问生成）。 */
+/**
+ * 新建会话。指定 collectionId → 知识库会话（RAG + 库内 agent）；
+ * 省略 collectionId → 全局会话（仅 agent，跨库检索）。标题可选，缺省由首条提问生成。
+ */
 export const createConversationRequestSchema = z.object({
-  collectionId: uuidSchema,
+  collectionId: uuidSchema.optional(),
   title: z.string().min(1).max(200).optional(),
 })
 export type CreateConversationRequest = z.infer<typeof createConversationRequestSchema>

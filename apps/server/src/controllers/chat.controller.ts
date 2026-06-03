@@ -22,6 +22,11 @@ export function createChatController(c: Container): Router<AppState> {
     ctx.body = await chat.listConversations(requirePrincipal(ctx.state), ctx.params.collectionId!)
   })
 
+  // 我的全局会话列表（不绑库，仅 agent 模式）
+  router.get('/conversations', async (ctx) => {
+    ctx.body = await chat.listGlobalConversations(requirePrincipal(ctx.state))
+  })
+
   // 会话详情（含全部消息）
   router.get('/conversations/:id', async (ctx) => {
     ctx.body = await chat.getConversation(requirePrincipal(ctx.state), ctx.params.id!)

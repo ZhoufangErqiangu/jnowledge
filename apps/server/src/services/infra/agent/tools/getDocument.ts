@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import type { Models } from '../../../../models/index.js'
+import type { CollectionService } from '../../../domain/collection.service.js'
 import type { Tool, ToolResult } from '../types.js'
 
 const paramsSchema = z.object({
@@ -8,9 +9,10 @@ const paramsSchema = z.object({
 
 /**
  * primitive 工具示例：按 id 取文档标题与正文摘要。
- * 受当前 collection 范围约束（最小权限）——只能读 ctx.collectionId 下的文档。
+ * 作用域：知识库会话只能读 ctx.collectionId 下的文档；
+ * 全局会话不绑库，改按 ctx.principal 校验该文档所属库的 viewer 权限（最小权限）。
  */
-export function createGetDocumentTool(models: Models): Tool {
+export function createGetDocumentTool(models: Models, collectionService: CollectionService): Tool {
   return {
     name: 'get_document',
     description:
@@ -19,12 +21,22 @@ export function createGetDocumentTool(models: Models): Tool {
     handler: async (args, ctx): Promise<ToolResult> => {
       const { documentId } = args as z.infer<typeof paramsSchema>
       const doc = await models.documents.findById(documentId)
-      if (!doc || doc.collection_id !== ctx.collectionId) {
-        return {
-          ok: false,
-          output: '文档不存在或不属于当前知识库',
-          summary: `get_document(${documentId})：未找到`,
-          error: 'not found',
+      const notFound: ToolResult = {
+        ok: false,
+        output: '文档不存在或无权访问',
+        summary: `get_document(${documentId})：未找到`,
+        error: 'not found',
+      }
+      if (!doc) return notFound
+      if (ctx.collectionId) {
+        // 知识库会话：限定本库。
+        if (doc.collection_id !== ctx.collectionId) return notFound
+      } else {
+        // 全局会话：按用户权限放行其可访问库内的文档。
+        try {
+          await collectionService.assertRole(ctx.principal, doc.collection_id, 'viewer')
+        } catch {
+          return notFound
         }
       }
       const version = doc.current_version_id

@@ -8,10 +8,14 @@ import {
   type RunContext,
   createGetDocumentTool,
   createKnowledgeSearchTool,
+  createListCollectionsTool,
+  createMutationTools,
+  createSafetyClassifier,
   createToolRegistry,
   runAgent,
 } from '../infra/agent/index.js'
 import type { CollectionService, Principal } from './collection.service.js'
+import type { DocumentService } from './document.service.js'
 import type { RetrievalService, RetrievedChunk } from './retrieval.js'
 import { AppError } from '../../errors.js'
 
@@ -20,6 +24,7 @@ export interface AgentDeps {
   infra: Infra
   logger: Logger
   collectionService: CollectionService
+  documentService: DocumentService
   retrieval: RetrievalService
 }
 
@@ -28,7 +33,27 @@ export interface AgentService {
   ask(p: Principal, conversationId: string, question: string): AsyncIterable<AgentStreamEvent>
 }
 
-/** 本期唯一的代码定义 agent（不做 CRUD 实体）。 */
+/** 增删改工具名（两个 agent 都授予；权限由服务层按 editor 校验）。 */
+const WRITE_TOOL_NAMES = [
+  'create_document',
+  'update_document',
+  'delete_document',
+  'move_document',
+  'create_collection',
+  'rename_collection',
+  'delete_collection',
+]
+
+/** 写能力 + 两阶段确认协议的系统提示（两个 agent 共用）。 */
+const WRITE_GUIDE = [
+  '你还可以增删改知识库内容（新建/修改/删除/移动文档，新建/重命名/删除知识库）。使用写工具时：',
+  '- 仅在用户明确要求改动时才动手；改动前先想清楚目标对象与范围。',
+  '- 若某次写调用返回「需用户确认」，必须把其中的计划与风险如实转述给用户并停下，不要继续执行；',
+  '  待用户在后续消息中明确同意后，再用相同操作并附上返回的 confirmToken 重新调用该工具。严禁自行确认。',
+  '- 若用户未同意或要求取消，则放弃该操作。',
+]
+
+/** 知识库会话的 agent：作用域固定本库，knowledge_search 默认检索当前库。 */
 const KNOWLEDGE_ASSISTANT: AgentDef = {
   name: 'knowledge_assistant',
   description: '基于知识库检索回答问题的助手',
@@ -38,11 +63,32 @@ const KNOWLEDGE_ASSISTANT: AgentDef = {
     '- 若检索片段不足，可用 get_document 查看某文档更多上下文；仍不足则如实说明「根据现有资料无法回答」，不要臆测。',
     '- 回答时，凡引用了检索资料的句子，必须在句末用对应的 [序号] 标注来源（可多个，如 [1][3]）。',
     '- 闲聊或无需知识库即可回答的问题，直接回答，不必检索。',
+    ...WRITE_GUIDE,
     '- 用简洁的中文回答。',
   ].join('\n'),
   tier: 'standard',
-  toolNames: ['knowledge_search', 'get_document'],
-  maxSteps: 8,
+  toolNames: ['knowledge_search', 'get_document', ...WRITE_TOOL_NAMES],
+  maxSteps: 10,
+}
+
+/** 全局会话的 agent：不绑库，先 list_collections 选库，再带 collectionId 检索（可跨多库）。 */
+const GLOBAL_ASSISTANT: AgentDef = {
+  name: 'global_assistant',
+  description: '可跨知识库检索回答问题的全局助手',
+  system: [
+    '你是全局智能助手，可调用工具跨多个知识库检索来回答用户问题。',
+    '- 当问题需要依据知识库内容时：先调用 list_collections 查看可访问的知识库及其 id；',
+    '  再选定最相关的库，以其 id 调用 knowledge_search(query, collectionId) 检索；必要时对多个库分别检索。',
+    '- 若检索片段不足，可用 get_document 查看某文档更多上下文；仍不足则如实说明「根据现有资料无法回答」，不要臆测。',
+    '- 回答时，凡引用了检索资料的句子，必须在句末用对应的 [序号] 标注来源（可多个，如 [1][3]）。',
+    '- 闲聊或无需知识库即可回答的问题，直接回答，不必检索。',
+    '- 写操作需指定目标库/文档 id（可先用 list_collections 或 knowledge_search 获取）。',
+    ...WRITE_GUIDE,
+    '- 用简洁的中文回答。',
+  ].join('\n'),
+  tier: 'standard',
+  toolNames: ['list_collections', 'knowledge_search', 'get_document', ...WRITE_TOOL_NAMES],
+  maxSteps: 12,
 }
 
 /** wall-clock 熔断（ms）。 */
@@ -51,13 +97,24 @@ const RUN_WALL_CLOCK_MS = 120_000
 const RUN_CHAR_BUDGET = 200_000
 
 export function createAgentService(deps: AgentDeps): AgentService {
-  const { models, infra, logger, collectionService, retrieval } = deps
+  const { models, infra, logger, collectionService, documentService, retrieval } = deps
   const { llm } = infra
+  const classifier = createSafetyClassifier(llm)
 
-  async function loadWithAccess(p: Principal, conversationId: string, minRole: 'viewer' | 'editor') {
+  async function loadWithAccess(
+    p: Principal,
+    conversationId: string,
+    minRole: 'viewer' | 'editor',
+  ) {
     const cv = await models.conversations.findById(conversationId)
     if (!cv) throw new AppError(ERROR_CODES.NOT_FOUND, '会话不存在')
-    await collectionService.assertRole(p, cv.collection_id, minRole)
+    if (cv.collection_id) {
+      // 知识库会话：复用 collection 成员关系做 ACL。
+      await collectionService.assertRole(p, cv.collection_id, minRole)
+    } else if (cv.created_by !== p.uid && p.role !== 'admin') {
+      // 全局会话：仅创建者（或 admin）可访问。
+      throw new AppError(ERROR_CODES.FORBIDDEN, '无权访问该会话')
+    }
     return cv
   }
 
@@ -86,26 +143,36 @@ export function createAgentService(deps: AgentDeps): AgentService {
       const historyRows = await models.messages.listByConversation(conversationId)
 
       // 落库用户消息；首问且标题为占位时用问题生成标题。
-      await models.messages.insert({ id: uuidv7(), conversationId, role: 'user', content: question })
+      await models.messages.insert({
+        id: uuidv7(),
+        conversationId,
+        role: 'user',
+        content: question,
+      })
       if (historyRows.length === 0 && cv.title === '新会话') {
         await models.conversations.setTitle(conversationId, truncate(question, 30))
       }
 
+      // 全局会话（无绑定库）→ 全局助手（先列库再选库）；知识库会话 → 库内助手。
+      const agentDef = cv.collection_id ? KNOWLEDGE_ASSISTANT : GLOBAL_ASSISTANT
+
       await models.agentRuns.insert({
         id: runId,
         conversationId,
-        agentName: KNOWLEDGE_ASSISTANT.name,
+        agentName: agentDef.name,
         input: question,
       })
 
-      // 降级：未配置 chat 供应商 → 不进 ReAct，直接检索列片段（对齐 chat.service）。
+      // 降级：未配置 chat 供应商 → 不进 ReAct。知识库会话直接检索列片段；全局会话无固定库，仅提示。
       if (!llm.configured) {
-        const chunks = await retrieval.retrieve(cv.collection_id, question)
-        const answer = chunks.length
-          ? `（未配置生成模型，以下为检索到的相关片段）\n\n${chunks
-              .map((c) => `[${c.marker}] ${c.snippet}`)
-              .join('\n')}`
-          : '（未配置生成模型，且未检索到相关资料）'
+        const chunks = cv.collection_id ? await retrieval.retrieve(cv.collection_id, question) : []
+        const answer = !cv.collection_id
+          ? '（未配置生成模型，全局助手需要生成模型才能选库检索）'
+          : chunks.length
+            ? `（未配置生成模型，以下为检索到的相关片段）\n\n${chunks
+                .map((c) => `[${c.marker}] ${c.snippet}`)
+                .join('\n')}`
+            : '（未配置生成模型，且未检索到相关资料）'
         const citations = chunks.map((c) => toCitation(c, c.marker))
         yield { type: 'token', delta: answer }
         yield { type: 'citations', citations }
@@ -122,14 +189,25 @@ export function createAgentService(deps: AgentDeps): AgentService {
         return
       }
 
-      // 装配工具注册表（授予 knowledge_assistant 的子集）+ run 上下文。
+      // 装配工具注册表（全集；agent 按 toolNames 授予子集）+ run 上下文。
       const registry = createToolRegistry([
-        createKnowledgeSearchTool(retrieval),
-        createGetDocumentTool(models),
+        createKnowledgeSearchTool(retrieval, collectionService),
+        createGetDocumentTool(models, collectionService),
+        createListCollectionsTool(collectionService),
+        ...createMutationTools({
+          documentService,
+          collectionService,
+          classifier,
+          pendingOps: models.pendingOperations,
+        }),
       ])
       const citations: Citation[] = []
       const ctx: RunContext = {
-        collectionId: cv.collection_id,
+        // 知识库会话固定本库；全局会话留空，由模型经 list_collections/collectionId 选库。
+        ...(cv.collection_id ? { collectionId: cv.collection_id } : {}),
+        principal: { uid: p.uid, role: p.role },
+        conversationId,
+        runId,
         depth: 0,
         deadline: Date.now() + RUN_WALL_CLOCK_MS,
         charBudget: RUN_CHAR_BUDGET,
@@ -142,7 +220,7 @@ export function createAgentService(deps: AgentDeps): AgentService {
 
       let answer = ''
       const inputBySeq = new Map<number, unknown>()
-      for await (const ev of runAgent(KNOWLEDGE_ASSISTANT, question, ctx)) {
+      for await (const ev of runAgent(agentDef, question, ctx)) {
         switch (ev.type) {
           case 'reasoning':
             yield { type: 'reasoning', delta: ev.delta }

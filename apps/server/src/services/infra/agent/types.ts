@@ -48,7 +48,17 @@ export interface AgentDef {
 
 /** 一次 run 的上下文（含熔断预算与可变引用聚合器）。 */
 export interface RunContext {
-  collectionId: string
+  /**
+   * 绑定的知识库：知识库会话固定本库；全局会话为 undefined，
+   * 工具需让模型显式选库（list_collections → knowledge_search(collectionId)）。
+   */
+  collectionId?: string
+  /** 请求者身份；全局态工具按其权限校验所选库的访问（结构化，避免 infra 反依赖 domain）。 */
+  principal: { uid: string; role: 'admin' | 'user' }
+  /** 当前会话 id；写操作两阶段确认据此定位 pending。 */
+  conversationId: string
+  /** 当前 run id；确认门要求「提案 run ≠ 执行 run」，防同轮自确认绕过。 */
+  runId: string
   /** agent-as-tool 递归深度（防无限递归，配合 MAX_AGENT_DEPTH）。 */
   depth: number
   /** wall-clock 熔断的截止时间戳（ms）。 */

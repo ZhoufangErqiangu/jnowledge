@@ -6,11 +6,13 @@ import type { Citation } from '@jnowledge/shared'
 import { useChatStore } from '@/stores/chat'
 import { ApiError } from '@/apis/http'
 import { formatDate } from '@/utils/format'
+import { renderMarkdown } from '@/utils/markdown'
 
 const route = useRoute()
 const router = useRouter()
 const chat = useChatStore()
-const collectionId = route.params.collectionId as string
+// 无 collectionId 参数 → 全局助手（仅 agent，跨库检索）。
+const collectionId = (route.params.collectionId as string | undefined) ?? null
 
 const input = ref('')
 const scroller = ref<HTMLElement | null>(null)
@@ -77,7 +79,7 @@ function gotoCitation(c: Citation) {
     <el-card class="cv-pane" shadow="never">
       <template #header>
         <div class="pane-head">
-          <el-button text @click="router.push('/collections')">← 知识库</el-button>
+          <span class="pane-label">{{ chat.isGlobal ? '🌐 全局助手' : '会话' }}</span>
           <el-button text type="primary" @click="newConversation">+ 新会话</el-button>
         </div>
       </template>
@@ -102,7 +104,13 @@ function gotoCitation(c: Citation) {
       <div ref="scroller" class="msg-scroll">
         <div v-for="m in chat.messages" :key="m.id" class="msg" :class="m.role">
           <div class="bubble">
-            <div class="content">{{ m.content }}</div>
+            <!-- 用户消息纯文本；助手消息按 Markdown 渲染 -->
+            <div
+              v-if="m.role === 'assistant'"
+              class="content md"
+              v-html="renderMarkdown(m.content)"
+            />
+            <div v-else class="content">{{ m.content }}</div>
             <div v-if="m.citations.length" class="cites">
               <el-tag
                 v-for="c in m.citations"
@@ -137,7 +145,9 @@ function gotoCitation(c: Citation) {
                 <pre class="reasoning-body">{{ chat.streamReasoning }}</pre>
               </el-collapse-item>
             </el-collapse>
-            <div class="content">{{ chat.streamText }}<span class="caret">▍</span></div>
+            <div class="content md">
+              <span v-html="renderMarkdown(chat.streamText)" /><span class="caret">▍</span>
+            </div>
             <div v-if="chat.streamCitations.length" class="cites">
               <el-tag
                 v-for="c in chat.streamCitations"
@@ -154,7 +164,11 @@ function gotoCitation(c: Citation) {
 
         <el-empty
           v-if="chat.messages.length === 0 && !chat.streaming"
-          description="向该知识库提问，答案将基于库内文档并标注引用"
+          :description="
+            chat.isGlobal
+              ? '全局助手：自动选择相关知识库检索作答，并标注引用'
+              : '向该知识库提问，答案将基于库内文档并标注引用'
+          "
         />
       </div>
 
@@ -168,7 +182,9 @@ function gotoCitation(c: Citation) {
           @keydown.enter.exact.prevent="send"
         />
         <div class="composer-actions">
+          <el-tag v-if="chat.isGlobal" size="small" type="success" effect="plain">Agent</el-tag>
           <el-switch
+            v-else
             v-model="chat.agentMode"
             :disabled="chat.streaming"
             inline-prompt
@@ -194,6 +210,9 @@ function gotoCitation(c: Citation) {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+.pane-label {
+  font-weight: 600;
 }
 .cv-list {
   list-style: none;
@@ -253,6 +272,77 @@ function gotoCitation(c: Citation) {
   white-space: pre-wrap;
   word-break: break-word;
   line-height: 1.6;
+}
+/* Markdown 渲染块：交给元素自身排版，去掉 pre-wrap 以免标签间多余空白 */
+.content.md {
+  white-space: normal;
+}
+.content.md :deep(p) {
+  margin: 0 0 8px;
+}
+.content.md :deep(p:last-child) {
+  margin-bottom: 0;
+}
+.content.md :deep(h1),
+.content.md :deep(h2),
+.content.md :deep(h3),
+.content.md :deep(h4) {
+  margin: 12px 0 8px;
+  font-size: 1.05em;
+  font-weight: 600;
+}
+.content.md :deep(ul),
+.content.md :deep(ol) {
+  margin: 4px 0 8px;
+  padding-left: 20px;
+}
+.content.md :deep(li) {
+  margin: 2px 0;
+}
+.content.md :deep(code) {
+  font-family: var(--el-font-family-mono, monospace);
+  font-size: 0.92em;
+  background: var(--el-fill-color-dark);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+.content.md :deep(pre) {
+  background: var(--el-fill-color-darker);
+  padding: 10px 12px;
+  border-radius: 6px;
+  overflow-x: auto;
+  margin: 8px 0;
+}
+.content.md :deep(pre code) {
+  background: none;
+  padding: 0;
+}
+.content.md :deep(blockquote) {
+  margin: 8px 0;
+  padding: 2px 12px;
+  border-left: 3px solid var(--el-border-color);
+  color: var(--el-text-color-secondary);
+}
+.content.md :deep(table) {
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 0.95em;
+}
+.content.md :deep(th),
+.content.md :deep(td) {
+  border: 1px solid var(--el-border-color);
+  padding: 5px 10px;
+  text-align: left;
+}
+.content.md :deep(th) {
+  background: var(--el-fill-color-light);
+  font-weight: 600;
+}
+.content.md :deep(a) {
+  color: var(--el-color-primary);
+}
+.content.md :deep(img) {
+  max-width: 100%;
 }
 .cites {
   margin-top: 8px;

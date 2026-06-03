@@ -94,6 +94,15 @@ export function createDocumentRepo(db: DB) {
         .execute()
     },
 
+    /** 跨库移动：改文档所属知识库（chunk/向量经 document_version 不动，检索作用域随之变化）。 */
+    async setCollection(id: string, collectionId: string): Promise<void> {
+      await db
+        .updateTable('documents')
+        .set({ collection_id: collectionId, updated_at: sql`now()` })
+        .where('id', '=', id)
+        .execute()
+    },
+
     async softDelete(id: string): Promise<void> {
       await db
         .updateTable('documents')

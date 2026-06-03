@@ -6,7 +6,8 @@ export type ConversationRow = Selectable<ConversationsTable>
 
 export interface NewConversation {
   id: string
-  collectionId: string
+  /** null = 全局会话（不绑知识库，仅 agent）。 */
+  collectionId: string | null
   title: string
   createdBy: string
 }
@@ -27,6 +28,18 @@ export function createConversationRepo(db: DB) {
         .selectFrom('conversations')
         .selectAll()
         .where('collection_id', '=', collectionId)
+        .where('created_by', '=', createdBy)
+        .where('deleted_at', 'is', null)
+        .orderBy('updated_at', 'desc')
+        .execute()
+    },
+
+    /** 某用户的全局会话（collection_id 为 null），按最近活跃排序。 */
+    async listGlobal(createdBy: string): Promise<ConversationRow[]> {
+      return db
+        .selectFrom('conversations')
+        .selectAll()
+        .where('collection_id', 'is', null)
         .where('created_by', '=', createdBy)
         .where('deleted_at', 'is', null)
         .orderBy('updated_at', 'desc')

@@ -18,11 +18,14 @@ export interface TraceStep {
 
 export const useChatStore = defineStore('chat', () => {
   const collectionId = ref<string | null>(null)
+  // 全局会话模式：不绑知识库，仅 agent（跨库检索）。与 collectionId 为 null 同义，但显式标记避免与「未加载」混淆。
+  const isGlobal = ref(false)
   const conversations = ref<Conversation[]>([])
   const currentId = ref<string | null>(null)
   const messages = ref<Message[]>([])
 
   // Agent 模式开关：开 → 走自主编排的 agent 端点（带执行轨迹）；关 → 走 B 档 RAG。
+  // 全局模式下恒为 agent（无 RAG 可选）。
   const agentMode = ref(false)
 
   // 流式中的助手草稿（未落库前的实时显示）。
@@ -33,9 +36,11 @@ export const useChatStore = defineStore('chat', () => {
   // Agent 模式下的实时执行轨迹。
   const streamSteps = ref<TraceStep[]>([])
 
-  async function loadConversations(cid: string) {
+  /** 传 collection id → 知识库会话；传 null → 全局会话列表。 */
+  async function loadConversations(cid: string | null) {
     collectionId.value = cid
-    conversations.value = await chatApi.list(cid)
+    isGlobal.value = cid === null
+    conversations.value = cid ? await chatApi.list(cid) : await chatApi.listGlobal()
   }
 
   async function open(id: string) {
@@ -45,8 +50,9 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function create() {
-    if (!collectionId.value) return
-    const cv = await chatApi.create({ collectionId: collectionId.value })
+    // 全局会话不带 collectionId；知识库会话必须有当前库。
+    if (!isGlobal.value && !collectionId.value) return
+    const cv = await chatApi.create(isGlobal.value ? {} : { collectionId: collectionId.value! })
     conversations.value.unshift(cv)
     currentId.value = cv.id
     messages.value = []
@@ -103,7 +109,8 @@ export const useChatStore = defineStore('chat', () => {
     }
 
     try {
-      if (agentMode.value) {
+      // 全局会话只有 agent；知识库会话按开关。
+      if (isGlobal.value || agentMode.value) {
         await agentApi.ask(cid, question, (ev) => {
           if (ev.type === 'step_start') {
             streamSteps.value.push({
@@ -133,13 +140,15 @@ export const useChatStore = defineStore('chat', () => {
     } finally {
       streaming.value = false
       resetStream()
-      // 刷新会话列表（标题/排序可能变化）。
-      if (collectionId.value) loadConversations(collectionId.value).catch(() => undefined)
+      // 刷新会话列表（标题/排序可能变化）。全局会话传 null 重新拉全局列表。
+      if (isGlobal.value || collectionId.value)
+        loadConversations(collectionId.value).catch(() => undefined)
     }
   }
 
   return {
     collectionId,
+    isGlobal,
     conversations,
     currentId,
     messages,

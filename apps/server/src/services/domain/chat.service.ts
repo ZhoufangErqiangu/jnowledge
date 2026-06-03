@@ -27,6 +27,8 @@ export interface ChatDeps {
 export interface ChatService {
   createConversation(p: Principal, req: CreateConversationRequest): Promise<Conversation>
   listConversations(p: Principal, collectionId: string): Promise<Conversation[]>
+  /** 全局会话列表（不绑库，仅 agent 模式）。 */
+  listGlobalConversations(p: Principal): Promise<Conversation[]>
   getConversation(p: Principal, conversationId: string): Promise<ConversationDetail>
   removeConversation(p: Principal, conversationId: string): Promise<void>
   /** 流式问答：产出 SSE 事件序列；落库 user + assistant 消息。 */
@@ -43,10 +45,19 @@ export function createChatService(deps: ChatDeps): ChatService {
   const { models, infra, logger, collectionService, retrieval } = deps
   const { llm } = infra
 
-  async function loadWithAccess(p: Principal, conversationId: string, minRole: 'viewer' | 'editor') {
+  async function loadWithAccess(
+    p: Principal,
+    conversationId: string,
+    minRole: 'viewer' | 'editor',
+  ) {
     const cv = await models.conversations.findById(conversationId)
     if (!cv) throw new AppError(ERROR_CODES.NOT_FOUND, '会话不存在')
-    await collectionService.assertRole(p, cv.collection_id, minRole)
+    if (cv.collection_id) {
+      await collectionService.assertRole(p, cv.collection_id, minRole)
+    } else if (cv.created_by !== p.uid && p.role !== 'admin') {
+      // 全局会话：仅创建者（或 admin）可访问。
+      throw new AppError(ERROR_CODES.FORBIDDEN, '无权访问该会话')
+    }
     return cv
   }
 
@@ -95,6 +106,13 @@ export function createChatService(deps: ChatDeps): ChatService {
       return
     }
 
+    // RAG 问答须绑定知识库；全局会话只支持 agent 模式（走 /agent 端点）。
+    const collectionId = cv.collection_id
+    if (!collectionId) {
+      yield { type: 'error', message: '全局会话不支持 RAG 问答，请使用 Agent 模式' }
+      return
+    }
+
     try {
       // 历史（本轮提问入库前）作为改写与生成的上下文。
       const historyRows = await models.messages.listByConversation(conversationId)
@@ -113,7 +131,7 @@ export function createChatService(deps: ChatDeps): ChatService {
 
       // 检索：改写 → 完整混合检索。
       const rewritten = await retrieval.rewriteQuery(question, history)
-      const chunks = await retrieval.retrieve(cv.collection_id, rewritten)
+      const chunks = await retrieval.retrieve(collectionId, rewritten)
 
       // 生成。
       let answer = ''
@@ -167,10 +185,11 @@ export function createChatService(deps: ChatDeps): ChatService {
 
   return {
     async createConversation(p, req) {
-      await collectionService.assertRole(p, req.collectionId, 'viewer')
+      // 指定库 → 知识库会话（需 viewer 权限）；省略 → 全局会话（任何登录用户可建）。
+      if (req.collectionId) await collectionService.assertRole(p, req.collectionId, 'viewer')
       const row = await models.conversations.insert({
         id: uuidv7(),
-        collectionId: req.collectionId,
+        collectionId: req.collectionId ?? null,
         title: req.title ?? '新会话',
         createdBy: p.uid,
       })
@@ -180,6 +199,11 @@ export function createChatService(deps: ChatDeps): ChatService {
     async listConversations(p, collectionId) {
       await collectionService.assertRole(p, collectionId, 'viewer')
       const rows = await models.conversations.listByCollection(collectionId, p.uid)
+      return rows.map(toConversation)
+    },
+
+    async listGlobalConversations(p) {
+      const rows = await models.conversations.listGlobal(p.uid)
       return rows.map(toConversation)
     },
 
