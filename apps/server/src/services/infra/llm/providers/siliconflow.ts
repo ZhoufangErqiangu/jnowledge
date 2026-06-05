@@ -55,16 +55,19 @@ export class SiliconFlowChatProvider implements LLMCapability {
   }
 
   /**
-   * SiliconFlow（Qwen3 系）思考：布尔 enable_thinking + 可选 thinking_budget（token 上限）。
-   * 仅在开启时注入（关闭依赖模型默认，不发 enable_thinking:false——纯推理模型如 R1 可能不可关、避免 400）。
-   * budgetTokens 优先；否则用 effort→预算的启发式表；都无则只开不设预算（随模型默认）。
+   * SiliconFlow 思考：布尔 enable_thinking + 可选 thinking_budget（CoT token 上限）。
+   * - default（省略）：不发 enable_thinking，随模型默认。
+   * - off（显式 false）：发 enable_thinking:false 真关（注：纯推理模型如 R1 可能不支持关、回 400）。
+   * - on：enable_thinking:true + 预算。budgetTokens 优先，否则 effort→预算启发式表；都无则只开不设预算。
+   * 官方文档：thinking_budget 取值范围 128–32768，无论来源都 clamp 到该区间再发。
    */
   private thinkingBody(opts: { thinking?: Thinking }): Record<string, unknown> {
     const t = normalizeThinking(opts.thinking)
-    if (!t.enabled) return {}
+    if (t.mode === 'default') return {}
+    if (t.mode === 'off') return { enable_thinking: false }
     const body: Record<string, unknown> = { enable_thinking: true }
     const budget = t.budgetTokens ?? effortToBudget(t.effort)
-    if (budget !== undefined) body.thinking_budget = budget
+    if (budget !== undefined) body.thinking_budget = clampBudget(budget)
     return body
   }
 
@@ -225,15 +228,27 @@ export class SiliconFlowReranker implements Reranker {
 
 // ---- SiliconFlow（OpenAI 形状）chat 请求/响应辅助：本供应商专属，不外泄 ----
 
-/** 归一化 effort → thinking_budget（token）的启发式映射。仅本供应商用，可按模型微调。 */
+/** thinking_budget 官方取值范围（token）。 */
+const MIN_THINKING_BUDGET = 128
+const MAX_THINKING_BUDGET = 32768
+
+/** 把预算夹到官方范围 [128, 32768]，越界会被 API 拒。 */
+function clampBudget(n: number): number {
+  return Math.max(MIN_THINKING_BUDGET, Math.min(MAX_THINKING_BUDGET, Math.round(n)))
+}
+
+/**
+ * 归一化 effort → thinking_budget（token）的启发式映射。仅本供应商用，可按模型微调。
+ * 数值取在官方范围 128–32768 内；high 直接给满预算。
+ */
 function effortToBudget(effort?: ThinkingEffort): number | undefined {
   switch (effort) {
     case 'low':
-      return 1024
-    case 'medium':
       return 4096
-    case 'high':
+    case 'medium':
       return 16384
+    case 'high':
+      return MAX_THINKING_BUDGET
     default:
       return undefined
   }

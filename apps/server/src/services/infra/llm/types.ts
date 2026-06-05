@@ -16,25 +16,27 @@ export interface ChatMessage {
 /**
  * 思考（thinking/CoT）控制。归一化、供应商无关——调用方只声明 tier、不知背后是哪个供应商，
  * 故此处只给可移植词汇，由各 provider class 映射到自己的原生参数（不支持的旋钮静默忽略）。
- * - boolean：true=默认强度开思考，false/省略=关
+ * - boolean：true=开（默认强度），false=显式关，省略=随模型默认
  * - effort：归一化强度（low/medium/high），可移植的默认旋钮
  * - budgetTokens：精确思考预算（token 上限），支持的供应商优先用
  */
 export type ThinkingEffort = 'low' | 'medium' | 'high'
 export type Thinking = boolean | { effort?: ThinkingEffort; budgetTokens?: number }
 
-/** normalizeThinking 的产物：boolean 糖已脱去，供各 provider 映射到 wire 参数。 */
+/** normalizeThinking 的产物：boolean 糖已脱去。mode 三态由各 provider 自行决定如何映射。 */
 export interface NormalizedThinking {
-  enabled: boolean
+  /** default=未指定（随模型默认）；off=显式关；on=显式开。 */
+  mode: 'default' | 'off' | 'on'
   effort?: ThinkingEffort
   budgetTokens?: number
 }
 
-/** 把 Thinking（含 boolean 糖/省略）归一化。对象形态一律视为「开启 + 可选微调」。 */
+/** 把 Thinking 归一化：省略→default，false→off，true/对象→on（对象含可选微调）。 */
 export function normalizeThinking(t: Thinking | undefined): NormalizedThinking {
-  if (t === undefined || t === false) return { enabled: false }
-  if (t === true) return { enabled: true }
-  const out: NormalizedThinking = { enabled: true }
+  if (t === undefined) return { mode: 'default' }
+  if (t === false) return { mode: 'off' }
+  if (t === true) return { mode: 'on' }
+  const out: NormalizedThinking = { mode: 'on' }
   if (t.effort !== undefined) out.effort = t.effort
   if (t.budgetTokens !== undefined) out.budgetTokens = t.budgetTokens
   return out

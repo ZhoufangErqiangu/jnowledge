@@ -9,6 +9,7 @@ import type {
   StreamChunk,
   TextOptions,
   Thinking,
+  ThinkingEffort,
   ToolCall,
 } from '../types.js'
 import { LlmError, normalizeThinking } from '../types.js'
@@ -48,13 +49,20 @@ export class DeepSeekChatProvider implements LLMCapability {
   }
 
   /**
-   * thinking 请求体片段。DeepSeek v4 只有思考开关——effort/budgetTokens 无原生旋钮，静默忽略。
-   * 仅在开启时注入（关闭依赖模型默认[默认关]，不发 disabled 形状，避免供应商拒绝）。
-   * 开关参数若变更，仅改此处形状。
+   * thinking 请求体片段。DeepSeek 官方旋钮：thinking.type(enabled/disabled) + reasoning_effort(high/max)。
+   * - default（省略）：不发 thinking 字段，随模型默认（DeepSeek 默认 enabled）。
+   * - off（显式 false）：发 {thinking:{type:'disabled'}}，真关。
+   * - on：发 enabled，并把归一化 effort 映射到 reasoning_effort（low/medium→high，high→max；无 effort 则随默认 high）。
+   * budgetTokens 在 DeepSeek 无原生 token 预算旋钮，静默忽略。
    */
   private thinkingBody(opts: { thinking?: Thinking }): Record<string, unknown> {
-    if (!normalizeThinking(opts.thinking).enabled) return {}
-    return { thinking: { type: 'enabled' } }
+    const t = normalizeThinking(opts.thinking)
+    if (t.mode === 'default') return {}
+    if (t.mode === 'off') return { thinking: { type: 'disabled' } }
+    const body: Record<string, unknown> = { thinking: { type: 'enabled' } }
+    const effort = effortToReasoning(t.effort)
+    if (effort) body.reasoning_effort = effort
+    return body
   }
 
   async text(opts: TextOptions): Promise<string> {
@@ -156,6 +164,22 @@ export class DeepSeekChatProvider implements LLMCapability {
 }
 
 // ---- DeepSeek（OpenAI 形状）请求/响应辅助：本供应商专属，不外泄 ----
+
+/**
+ * 归一化 effort → DeepSeek reasoning_effort。官方仅 high/max 两档（low/medium→high，xhigh→max）。
+ * 故本抽象层 low/medium 都给 high，high 给 max；无 effort 返回 undefined（不发、随默认 high）。
+ */
+function effortToReasoning(effort?: ThinkingEffort): 'high' | 'max' | undefined {
+  switch (effort) {
+    case 'high':
+      return 'max'
+    case 'low':
+    case 'medium':
+      return 'high'
+    default:
+      return undefined
+  }
+}
 
 function buildMessages(opts: TextOptions): ChatMessage[] {
   if (opts.messages) return opts.messages
