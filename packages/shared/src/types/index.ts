@@ -53,5 +53,10 @@ export type {
   MessageRole,
   AgentRunStatus,
   AgentStepKind,
+  ContextItemKind,
+  ContextItemState,
+  ContextItemFlags,
+  ContextItemMeta,
+  ContextItemToolCall,
 } from '../constants/enums.js'
 export type { ErrorCode } from '../constants/errors.js'

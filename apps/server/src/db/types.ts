@@ -1,14 +1,15 @@
 import type { ColumnType, Generated, JSONColumnType } from 'kysely'
 import type {
   AgentRunStatus,
-  AgentStepKind,
   Citation,
   CollectionRole,
   CollectionSettings,
   ContentFormat,
+  ContextItemFlags,
+  ContextItemKind,
+  ContextItemMeta,
   DocumentSourceType,
   DocumentStatus,
-  MessageRole,
   UserRole,
   UserStatus,
 } from '@jnowledge/shared'
@@ -132,19 +133,11 @@ export interface ConversationsTable {
   deleted_at: DeletedAt
 }
 
-export interface MessagesTable {
-  id: string
-  conversation_id: string
-  role: MessageRole
-  content: string
-  citations: JSONColumnType<Citation[], Citation[] | string | undefined, Citation[] | string>
-  created_at: CreatedAt
-}
-
 export interface AgentRunsTable {
   id: string
   conversation_id: string
-  message_id: ColumnType<string | null, string | null | undefined, string | null>
+  // 终答指针：指向 context_items 里的终答 assistant 条目；run 完成时回填（沿用「不设外键」约定）。
+  final_item_id: ColumnType<string | null, string | null | undefined, string | null>
   agent_name: string
   status: ColumnType<AgentRunStatus, AgentRunStatus | undefined, AgentRunStatus>
   input: string
@@ -153,17 +146,20 @@ export interface AgentRunsTable {
   updated_at: UpdatedAt
 }
 
-/** 执行轨迹（append-only）。input/output 为 jsonb，插入时显式 JSON.stringify。 */
-export interface AgentStepsTable {
+/**
+ * 统一上下文事件日志（五期：模型自管理上下文）。取代 messages + agent_steps。
+ * citations/meta/flags 为 jsonb，插入时显式 JSON.stringify。
+ */
+export interface ContextItemsTable {
   id: string
-  run_id: string
-  seq: number
-  kind: AgentStepKind
-  name: ColumnType<string | null, string | null | undefined, never>
-  // jsonb：selectable 为 pg 解析后的任意 JSON 值，insertable 为 JSON.stringify 串（或 null）。
-  input: ColumnType<unknown, string | null | undefined, never>
-  output: ColumnType<unknown, string | null | undefined, never>
-  error: ColumnType<string | null, string | null | undefined, never>
+  conversation_id: string
+  // RAG 单轮路径为 null；run 删除时置 null（消息独立于 run 存活）。
+  run_id: ColumnType<string | null, string | null | undefined, string | null>
+  kind: ContextItemKind
+  content: string
+  citations: JSONColumnType<Citation[], Citation[] | string | undefined, Citation[] | string>
+  meta: JSONColumnType<ContextItemMeta, ContextItemMeta | string | undefined, ContextItemMeta | string>
+  flags: JSONColumnType<ContextItemFlags, ContextItemFlags | string | undefined, ContextItemFlags | string>
   created_at: CreatedAt
 }
 
@@ -196,9 +192,8 @@ export interface Database {
   chunks: ChunksTable
   chunk_embeddings: ChunkEmbeddingsTable
   conversations: ConversationsTable
-  messages: MessagesTable
   agent_runs: AgentRunsTable
-  agent_steps: AgentStepsTable
+  context_items: ContextItemsTable
   pending_operations: PendingOperationsTable
 }
 

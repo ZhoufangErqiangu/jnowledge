@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import type { AgentTurnMessage } from '../llm/types.js'
 import { runAgent } from './runtime.js'
 import {
   type AgentDef,
@@ -36,8 +37,13 @@ export function agentAsTool(def: AgentDef): Tool {
       }
       const { task } = args as z.infer<typeof paramsSchema>
       const childCtx: RunContext = { ...ctx, depth: ctx.depth + 1 }
+      // 子 run 消息隔离：自拼 [system, task]，不见父 run 历史，也不落 context_items（避免污染用户视图/跨轮记忆）。
+      const childMessages: AgentTurnMessage[] = [
+        { role: 'system', content: def.system },
+        { role: 'user', content: task },
+      ]
       let answer = ''
-      for await (const ev of runAgent(def, task, childCtx)) {
+      for await (const ev of runAgent(def, childMessages, childCtx)) {
         if (ev.type === 'text') answer += ev.delta
         else if (ev.type === 'final') answer = ev.answer
         else if (ev.type === 'error') {

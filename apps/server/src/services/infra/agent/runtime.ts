@@ -6,21 +6,20 @@ import { type AgentDef, type AgentEvent, type RunContext, DEFAULT_MAX_STEPS } fr
  * 每轮让模型在「被授予的工具集」里选；选了工具 → 校验参数 → 跑 handler → 回喂结果 → 继续；
  * 不选工具（给出最终答复）→ 收流式 text 作 answer → 终止。
  *
+ * 上下文由调用方经投影引擎预先重建后以 `messages` 传入（含 system + 历史 + 本轮 user），
+ * runtime 不再自行拼装——这是「模型自管理上下文」的接缝：实际推理上下文 = flag 派生的视图。
+ *
  * 四重熔断：maxSteps（步数）/ MAX_AGENT_DEPTH（递归深度，见 agentAsTool）/
  * charBudget（近似 token 预算）/ deadline（wall-clock）。越界即 emit error 收尾。
  */
 export async function* runAgent(
   def: AgentDef,
-  input: string,
+  messages: AgentTurnMessage[],
   ctx: RunContext,
 ): AsyncIterable<AgentEvent> {
   const maxSteps = def.maxSteps ?? DEFAULT_MAX_STEPS
   const tools = ctx.registry.specsFor(def.toolNames)
-  const messages: AgentTurnMessage[] = [
-    { role: 'system', content: def.system },
-    { role: 'user', content: input },
-  ]
-  let approxChars = input.length
+  let approxChars = messages.reduce((n, m) => n + ('content' in m ? (m.content?.length ?? 0) : 0), 0)
   let seq = 0
 
   for (let step = 0; step < maxSteps; step++) {
@@ -60,6 +59,8 @@ export async function* runAgent(
     messages.push(
       answer ? { role: 'assistant', content: answer, toolCalls } : { role: 'assistant', toolCalls },
     )
+    // emit 在 step_start 之前 → service 落库顺序 = (assistant, ...tool_result)，与逻辑序一致。
+    yield { type: 'assistant', ...(answer ? { content: answer } : {}), toolCalls }
 
     for (const call of toolCalls) {
       seq++
@@ -75,6 +76,7 @@ export async function* runAgent(
           seq,
           kind: 'tool',
           name: call.name,
+          toolCallId: call.id,
           ok: false,
           summary: msg,
           output: null,
@@ -95,6 +97,7 @@ export async function* runAgent(
           seq,
           kind: 'tool',
           name: call.name,
+          toolCallId: call.id,
           ok: false,
           summary: content,
           output: null,
@@ -114,6 +117,7 @@ export async function* runAgent(
           seq,
           kind: 'tool',
           name: call.name,
+          toolCallId: call.id,
           ok: result.ok,
           summary: result.summary,
           output: result.output,
@@ -128,6 +132,7 @@ export async function* runAgent(
           seq,
           kind: 'tool',
           name: call.name,
+          toolCallId: call.id,
           ok: false,
           summary: `工具执行失败：${errMsg}`,
           output: null,

@@ -11,7 +11,8 @@ import type { Models } from '../../models/index.js'
 import type { Infra } from '../infra/index.js'
 import type { Logger } from '../../logger.js'
 import type { ChatMessage } from '../infra/llm/types.js'
-import { toConversation, toMessage } from '../../models/mappers.js'
+import { projectForChat, projectForUser, toContextItemView } from '../infra/agent/index.js'
+import { toConversation } from '../../models/mappers.js'
 import type { CollectionService, Principal } from './collection.service.js'
 import type { RetrievalService, RetrievedChunk } from './retrieval.js'
 import { AppError } from '../../errors.js'
@@ -34,6 +35,9 @@ export interface ChatService {
   /** 流式问答：产出 SSE 事件序列；落库 user + assistant 消息。 */
   ask(p: Principal, conversationId: string, question: string): AsyncIterable<ChatStreamEvent>
 }
+
+/** 跨轮历史投影进 LLM 上下文的字符预算。 */
+const HISTORY_CHAR_BUDGET = 60_000
 
 const GENERATION_SYSTEM = [
   '你是知识库问答助手。只能依据下面提供的「资料」回答用户问题，不得编造资料外的信息。',
@@ -114,18 +118,20 @@ export function createChatService(deps: ChatDeps): ChatService {
     }
 
     try {
-      // 历史（本轮提问入库前）作为改写与生成的上下文。
-      const historyRows = await models.messages.listByConversation(conversationId)
-      const history: ChatMessage[] = historyRows.map((m) => ({ role: m.role, content: m.content }))
+      // 历史（本轮提问入库前）作为改写与生成的上下文——经投影引擎从全量日志派生。
+      const priorItems = (await models.contextItems.listByConversation(conversationId)).map(
+        toContextItemView,
+      )
+      const history: ChatMessage[] = projectForChat(priorItems, HISTORY_CHAR_BUDGET)
 
-      // 落库用户消息；首问且标题为占位时用问题生成标题。
-      await models.messages.insert({
+      // 落库用户消息（RAG 单轮路径无 run，run_id 为 null）；首问且标题为占位时用问题生成标题。
+      await models.contextItems.insert({
         id: uuidv7(),
         conversationId,
-        role: 'user',
+        kind: 'user',
         content: question,
       })
-      if (historyRows.length === 0 && cv.title === '新会话') {
+      if (priorItems.length === 0 && cv.title === '新会话') {
         await models.conversations.setTitle(conversationId, truncate(question, 30))
       }
 
@@ -168,10 +174,10 @@ export function createChatService(deps: ChatDeps): ChatService {
         : chunks.map((c) => toCitation(c))
       yield { type: 'citations', citations }
 
-      const assistant = await models.messages.insert({
+      const assistant = await models.contextItems.insert({
         id: uuidv7(),
         conversationId,
-        role: 'assistant',
+        kind: 'assistant',
         content: answer,
         citations,
       })
@@ -209,8 +215,11 @@ export function createChatService(deps: ChatDeps): ChatService {
 
     async getConversation(p, conversationId) {
       const cv = await loadWithAccess(p, conversationId, 'viewer')
-      const messages = await models.messages.listByConversation(conversationId)
-      return { conversation: toConversation(cv), messages: messages.map(toMessage) }
+      const items = await models.contextItems.listByConversation(conversationId)
+      return {
+        conversation: toConversation(cv),
+        messages: projectForUser(items.map(toContextItemView)),
+      }
     },
 
     async removeConversation(p, conversationId) {

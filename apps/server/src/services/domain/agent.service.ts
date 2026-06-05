@@ -12,7 +12,9 @@ import {
   createMutationTools,
   createSafetyClassifier,
   createToolRegistry,
+  projectForLlm,
   runAgent,
+  toContextItemView,
 } from '../infra/agent/index.js'
 import type { CollectionService, Principal } from './collection.service.js'
 import type { DocumentService } from './document.service.js'
@@ -95,6 +97,8 @@ const GLOBAL_ASSISTANT: AgentDef = {
 const RUN_WALL_CLOCK_MS = 120_000
 /** 近似 token 预算（按字符数估算）的字符上限。 */
 const RUN_CHAR_BUDGET = 200_000
+/** 跨轮历史投影进 LLM 上下文的字符预算（留余量给本轮工具结果与生成）。 */
+const HISTORY_CHAR_BUDGET = 60_000
 
 export function createAgentService(deps: AgentDeps): AgentService {
   const { models, infra, logger, collectionService, documentService, retrieval } = deps
@@ -140,27 +144,30 @@ export function createAgentService(deps: AgentDeps): AgentService {
 
     const runId = uuidv7()
     try {
-      const historyRows = await models.messages.listByConversation(conversationId)
-
-      // 落库用户消息；首问且标题为占位时用问题生成标题。
-      await models.messages.insert({
-        id: uuidv7(),
-        conversationId,
-        role: 'user',
-        content: question,
-      })
-      if (historyRows.length === 0 && cv.title === '新会话') {
+      // 全量历史（本轮提问入库前）——投影成 LLM 上下文，并据此判断是否首问。
+      const priorItems = (await models.contextItems.listByConversation(conversationId)).map(
+        toContextItemView,
+      )
+      if (priorItems.length === 0 && cv.title === '新会话') {
         await models.conversations.setTitle(conversationId, truncate(question, 30))
       }
 
       // 全局会话（无绑定库）→ 全局助手（先列库再选库）；知识库会话 → 库内助手。
       const agentDef = cv.collection_id ? KNOWLEDGE_ASSISTANT : GLOBAL_ASSISTANT
 
+      // run 先建（user 条目的 run_id 外键指向它），再落本轮 user 条目。
       await models.agentRuns.insert({
         id: runId,
         conversationId,
         agentName: agentDef.name,
         input: question,
+      })
+      const userItem = await models.contextItems.insert({
+        id: uuidv7(),
+        conversationId,
+        runId,
+        kind: 'user',
+        content: question,
       })
 
       // 降级：未配置 chat 供应商 → 不进 ReAct。知识库会话直接检索列片段；全局会话无固定库，仅提示。
@@ -176,10 +183,11 @@ export function createAgentService(deps: AgentDeps): AgentService {
         const citations = chunks.map((c) => toCitation(c, c.marker))
         yield { type: 'token', delta: answer }
         yield { type: 'citations', citations }
-        const msg = await models.messages.insert({
+        const msg = await models.contextItems.insert({
           id: uuidv7(),
           conversationId,
-          role: 'assistant',
+          runId,
+          kind: 'assistant',
           content: answer,
           citations,
         })
@@ -218,10 +226,27 @@ export function createAgentService(deps: AgentDeps): AgentService {
         citations,
       }
 
+      // 本轮 user 已落库 → 投影含本轮 user；runtime 不再自拼 [system, user]。
+      const initialMessages = projectForLlm([...priorItems, toContextItemView(userItem)], {
+        system: agentDef.system,
+        budget: HISTORY_CHAR_BUDGET,
+      })
+
       let answer = ''
       const inputBySeq = new Map<number, unknown>()
-      for await (const ev of runAgent(agentDef, question, ctx)) {
+      for await (const ev of runAgent(agentDef, initialMessages, ctx)) {
         switch (ev.type) {
+          case 'assistant':
+            // 中间 assistant 轮（发起了工具调用）：全量落库，toolCalls 进 meta 供诊断/v2 重建。
+            await models.contextItems.insert({
+              id: uuidv7(),
+              conversationId,
+              runId,
+              kind: 'assistant',
+              content: ev.content ?? '',
+              ...(ev.toolCalls ? { meta: { toolCalls: ev.toolCalls } } : {}),
+            })
+            break
           case 'reasoning':
             yield { type: 'reasoning', delta: ev.delta }
             break
@@ -234,15 +259,23 @@ export function createAgentService(deps: AgentDeps): AgentService {
             yield { type: 'step_start', seq: ev.seq, kind: ev.kind, name: ev.name, input: ev.input }
             break
           case 'tool_result':
-            await models.agentSteps.insert({
+            // content 存 LLM 实际看到的字符串（往返真相源）；结构化 output/入参等进 meta 供诊断。
+            await models.contextItems.insert({
               id: uuidv7(),
+              conversationId,
               runId,
-              seq: ev.seq,
-              kind: ev.kind,
-              name: ev.name,
-              input: inputBySeq.get(ev.seq),
-              output: ev.output,
-              error: ev.error ?? null,
+              kind: 'tool_result',
+              content: typeof ev.output === 'string' ? ev.output : JSON.stringify(ev.output ?? null),
+              meta: {
+                seq: ev.seq,
+                name: ev.name,
+                toolCallId: ev.toolCallId,
+                ok: ev.ok,
+                error: ev.error ?? null,
+                summary: ev.summary,
+                input: inputBySeq.get(ev.seq),
+                output: ev.output,
+              },
             })
             yield { type: 'tool_result', seq: ev.seq, ok: ev.ok, summary: ev.summary }
             break
@@ -256,13 +289,14 @@ export function createAgentService(deps: AgentDeps): AgentService {
         }
       }
 
-      // 引用校验 + 落库 assistant 消息 + 完成 run。
+      // 引用校验 + 落库终答 assistant 条目 + 完成 run。
       const finalCitations = validateCitations(answer, citations)
       yield { type: 'citations', citations: finalCitations }
-      const assistant = await models.messages.insert({
+      const assistant = await models.contextItems.insert({
         id: uuidv7(),
         conversationId,
-        role: 'assistant',
+        runId,
+        kind: 'assistant',
         content: answer,
         citations: finalCitations,
       })

@@ -41,11 +41,11 @@ export function createAgentRunRepo(db: DB) {
         .executeTakeFirstOrThrow()
     },
 
-    /** 运行成功：回填终答消息 id + status=completed。 */
-    async complete(id: string, messageId: string): Promise<void> {
+    /** 运行成功：回填终答 context_item id + status=completed。 */
+    async complete(id: string, finalItemId: string): Promise<void> {
       await db
         .updateTable('agent_runs')
-        .set({ status: 'completed', message_id: messageId, updated_at: sql`now()` })
+        .set({ status: 'completed', final_item_id: finalItemId, updated_at: sql`now()` })
         .where('id', '=', id)
         .execute()
     },

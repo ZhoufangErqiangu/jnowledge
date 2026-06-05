@@ -68,3 +68,53 @@ export type AgentRunStatus = (typeof AGENT_RUN_STATUSES)[number]
 /** Agent 执行轨迹步骤类型（tool=调工具，agent=调子 agent 作工具）。 */
 export const AGENT_STEP_KINDS = ['tool', 'agent'] as const
 export type AgentStepKind = (typeof AGENT_STEP_KINDS)[number]
+
+/**
+ * 上下文事件日志（context_items）的条目类型（五期：模型自管理上下文）。
+ * 全量 append-only：user 提问 / assistant 轮（含 meta.toolCalls）/ tool_result 工具结果。
+ * 不设 tool_call 类型——工具调用的真相源是 assistant 条目的 meta.toolCalls。
+ */
+export const CONTEXT_ITEM_KINDS = ['user', 'assistant', 'tool_result'] as const
+export type ContextItemKind = (typeof CONTEXT_ITEM_KINDS)[number]
+
+/**
+ * 上下文条目状态（flag.state）：派生视图据此筛选。
+ * active=进入 LLM/用户视图；hidden=保留在全量日志但不进任一视图。
+ * summarized/pinned/protected 等高级 flag 留后续期次，本期不写。
+ */
+export const CONTEXT_ITEM_STATES = ['active', 'hidden'] as const
+export type ContextItemState = (typeof CONTEXT_ITEM_STATES)[number]
+
+/** context_items.meta 里持久化的工具调用（与 runtime 的 ToolCall 同形，可无损互转）。 */
+export interface ContextItemToolCall {
+  id: string
+  name: string
+  arguments: unknown
+}
+
+/**
+ * context_items.meta 的结构（按 kind 取用不同子集）：
+ * - assistant 轮：toolCalls（本轮发起的工具调用，供 v2 跨轮无损重建）。
+ * - tool_result：seq/name/toolCallId/ok/error/summary/output（执行轨迹 + 诊断，取代 agent_steps）。
+ */
+export interface ContextItemMeta {
+  toolCalls?: ContextItemToolCall[]
+  seq?: number
+  name?: string
+  toolCallId?: string
+  ok?: boolean
+  error?: string | null
+  summary?: string
+  /** 工具入参快照（诊断用，取代 agent_steps.input）。 */
+  input?: unknown
+  /** 工具结构化输出（诊断用；content 列存的是 LLM 实际看到的字符串）。 */
+  output?: unknown
+}
+
+/** context_items.flags：派生视图据此筛选；本期只写 state，其余留位。 */
+export interface ContextItemFlags {
+  state: ContextItemState
+  pinned?: boolean
+  protected?: boolean
+  summarized?: boolean
+}

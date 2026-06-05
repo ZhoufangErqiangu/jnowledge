@@ -1,7 +1,7 @@
 import type { z } from 'zod'
 import type { Citation, LlmTier } from '@jnowledge/shared'
 import type { Logger } from '../../../logger.js'
-import type { LLMClient, ToolSpec } from '../llm/types.js'
+import type { LLMClient, ToolCall, ToolSpec } from '../llm/types.js'
 
 /** 工具/子 agent 执行结果。 */
 export interface ToolResult {
@@ -73,14 +73,21 @@ export interface RunContext {
   citations: Citation[]
 }
 
-/** runtime 产出的事件（service 翻成 AgentStreamEvent 并落 agent_steps）。 */
+/** runtime 产出的事件（service 翻成 AgentStreamEvent 并落 context_items）。 */
 export type AgentEvent =
+  /**
+   * 中间 assistant 轮（发起了工具调用）。service 据此落一条 kind=assistant 的 context_item，
+   * meta.toolCalls 持久化 toolCalls 供诊断/v2 跨轮重建。终答不走此事件，走 final。
+   */
+  | { type: 'assistant'; content?: string; toolCalls?: ToolCall[] }
   | { type: 'step_start'; seq: number; kind: 'tool' | 'agent'; name: string; input: unknown }
   | {
       type: 'tool_result'
       seq: number
       kind: 'tool' | 'agent'
       name: string
+      /** 配对的 assistant.toolCalls[i].id；落 context_items.meta.toolCallId 供无损重建。 */
+      toolCallId: string
       ok: boolean
       summary: string
       output: unknown

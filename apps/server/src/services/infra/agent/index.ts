@@ -12,3 +12,10 @@ export { createGetDocumentTool } from './tools/getDocument.js'
 export { createListCollectionsTool } from './tools/listCollections.js'
 export { createMutationTools } from './tools/mutations.js'
 export { createSafetyClassifier } from './safetyClassifier.js'
+export {
+  type ContextItemView,
+  toContextItemView,
+  projectForLlm,
+  projectForChat,
+  projectForUser,
+} from './projection.js'
