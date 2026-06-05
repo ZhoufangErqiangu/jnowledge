@@ -13,6 +13,33 @@ export interface ChatMessage {
   content: string
 }
 
+/**
+ * 思考（thinking/CoT）控制。归一化、供应商无关——调用方只声明 tier、不知背后是哪个供应商，
+ * 故此处只给可移植词汇，由各 provider class 映射到自己的原生参数（不支持的旋钮静默忽略）。
+ * - boolean：true=默认强度开思考，false/省略=关
+ * - effort：归一化强度（low/medium/high），可移植的默认旋钮
+ * - budgetTokens：精确思考预算（token 上限），支持的供应商优先用
+ */
+export type ThinkingEffort = 'low' | 'medium' | 'high'
+export type Thinking = boolean | { effort?: ThinkingEffort; budgetTokens?: number }
+
+/** normalizeThinking 的产物：boolean 糖已脱去，供各 provider 映射到 wire 参数。 */
+export interface NormalizedThinking {
+  enabled: boolean
+  effort?: ThinkingEffort
+  budgetTokens?: number
+}
+
+/** 把 Thinking（含 boolean 糖/省略）归一化。对象形态一律视为「开启 + 可选微调」。 */
+export function normalizeThinking(t: Thinking | undefined): NormalizedThinking {
+  if (t === undefined || t === false) return { enabled: false }
+  if (t === true) return { enabled: true }
+  const out: NormalizedThinking = { enabled: true }
+  if (t.effort !== undefined) out.effort = t.effort
+  if (t.budgetTokens !== undefined) out.budgetTokens = t.budgetTokens
+  return out
+}
+
 export interface TextOptions {
   prompt?: string
   system?: string
@@ -20,10 +47,10 @@ export interface TextOptions {
   temperature?: number
   maxTokens?: number
   /**
-   * 是否开启思考链（thinking/CoT）。默认关。由调用层每次决定，不进 tier 配置。
+   * 思考链（thinking/CoT）控制。默认关，由调用层每次传入、一路透传到 provider。
    * 开启时 textStream 会分出 reasoning 两路；text() 仅返回最终答案（丢弃推理过程）。
    */
-  thinking?: boolean
+  thinking?: Thinking
   /** 覆盖默认模型（一般不用，tier 已绑模型） */
   model?: string
 }
@@ -85,7 +112,7 @@ export type AgentChunk =
 export interface GenerateOptions {
   messages: AgentTurnMessage[]
   tools: ToolSpec[]
-  thinking?: boolean
+  thinking?: Thinking
   temperature?: number
   maxTokens?: number
 }

@@ -11,9 +11,11 @@ import type {
   RerankHit,
   StreamChunk,
   TextOptions,
+  Thinking,
+  ThinkingEffort,
   ToolCall,
 } from '../types.js'
-import { LlmError } from '../types.js'
+import { LlmError, normalizeThinking } from '../types.js'
 
 export interface SiliconFlowConfig {
   apiKey: string
@@ -52,9 +54,18 @@ export class SiliconFlowChatProvider implements LLMCapability {
     return res
   }
 
-  /** SiliconFlow（Qwen3 系）思考开关：布尔 enable_thinking。仅显式开启时注入，默认随模型。 */
-  private thinkingBody(opts: { thinking?: boolean }): Record<string, unknown> {
-    return opts.thinking ? { enable_thinking: true } : {}
+  /**
+   * SiliconFlow（Qwen3 系）思考：布尔 enable_thinking + 可选 thinking_budget（token 上限）。
+   * 仅在开启时注入（关闭依赖模型默认，不发 enable_thinking:false——纯推理模型如 R1 可能不可关、避免 400）。
+   * budgetTokens 优先；否则用 effort→预算的启发式表；都无则只开不设预算（随模型默认）。
+   */
+  private thinkingBody(opts: { thinking?: Thinking }): Record<string, unknown> {
+    const t = normalizeThinking(opts.thinking)
+    if (!t.enabled) return {}
+    const body: Record<string, unknown> = { enable_thinking: true }
+    const budget = t.budgetTokens ?? effortToBudget(t.effort)
+    if (budget !== undefined) body.thinking_budget = budget
+    return body
   }
 
   async text(opts: TextOptions): Promise<string> {
@@ -213,6 +224,20 @@ export class SiliconFlowReranker implements Reranker {
 }
 
 // ---- SiliconFlow（OpenAI 形状）chat 请求/响应辅助：本供应商专属，不外泄 ----
+
+/** 归一化 effort → thinking_budget（token）的启发式映射。仅本供应商用，可按模型微调。 */
+function effortToBudget(effort?: ThinkingEffort): number | undefined {
+  switch (effort) {
+    case 'low':
+      return 1024
+    case 'medium':
+      return 4096
+    case 'high':
+      return 16384
+    default:
+      return undefined
+  }
+}
 
 function buildMessages(opts: TextOptions): ChatMessage[] {
   if (opts.messages) return opts.messages

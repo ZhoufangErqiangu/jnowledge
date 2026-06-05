@@ -8,17 +8,16 @@ import type {
   ObjectOptions,
   StreamChunk,
   TextOptions,
+  Thinking,
   ToolCall,
 } from '../types.js'
-import { LlmError } from '../types.js'
+import { LlmError, normalizeThinking } from '../types.js'
 
 export interface DeepSeekConfig {
   apiKey: string
   baseUrl: string
   /** tier 解析出的真实模型 id（发给 API 的 model 字段）。 */
   model: string
-  /** thinking 开关在请求体里的字段名（DeepSeek v4 混合模型，默认 `thinking`）。 */
-  thinkingField: string
 }
 
 /**
@@ -49,12 +48,13 @@ export class DeepSeekChatProvider implements LLMCapability {
   }
 
   /**
-   * thinking 请求体片段。仅在显式开启时注入（关闭依赖模型默认，避免发送供应商可能拒绝的 disabled 形状）。
-   * DeepSeek v4 混合模型的开关参数若变更，仅改 config.thinkingField + 此处形状。
+   * thinking 请求体片段。DeepSeek v4 只有思考开关——effort/budgetTokens 无原生旋钮，静默忽略。
+   * 仅在开启时注入（关闭依赖模型默认[默认关]，不发 disabled 形状，避免供应商拒绝）。
+   * 开关参数若变更，仅改此处形状。
    */
-  private thinkingBody(opts: { thinking?: boolean }): Record<string, unknown> {
-    if (!opts.thinking) return {}
-    return { [this.cfg.thinkingField]: { type: 'enabled' } }
+  private thinkingBody(opts: { thinking?: Thinking }): Record<string, unknown> {
+    if (!normalizeThinking(opts.thinking).enabled) return {}
+    return { thinking: { type: 'enabled' } }
   }
 
   async text(opts: TextOptions): Promise<string> {

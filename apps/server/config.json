@@ -6,8 +6,7 @@
         "deepseek": {
           "kind": "deepseek",
           "apiKeyEnv": "DEEPSEEK_API_KEY",
-          "baseUrl": "https://api.deepseek.com/v1",
-          "thinkingField": "thinking"
+          "baseUrl": "https://api.deepseek.com/v1"
         },
         "siliconflow": {
           "kind": "siliconflow",

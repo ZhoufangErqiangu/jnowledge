@@ -70,7 +70,6 @@ export function createChatService(chat: ChatConfig): ChatService {
       apiKey: providerCfg.apiKey,
       baseUrl: providerCfg.baseUrl,
       modelId: modelCfg.model,
-      thinkingField: providerCfg.thinkingField,
     })
     cache.set(modelKey, cap)
     return cap

@@ -61,11 +61,6 @@ const configSchema = z.object({
           kind: z.enum(['deepseek', 'siliconflow']).default('deepseek'),
           apiKey: z.string().optional(),
           baseUrl: z.string(),
-          /**
-           * thinking 开关在请求体里的字段名（仅 kind=openai 用；DeepSeek v4 混合模型）。
-           * 如官方参数名变更，仅改此处 + DeepSeekChatProvider.thinkingBody 形状。
-           */
-          thinkingField: z.string().default('thinking'),
         }),
       ),
       /** ② 模型注册表：key=模型逻辑名，provider 指向 providers，model 是供应商侧真实模型 id。 */
@@ -129,7 +124,6 @@ const llmFileSchema = z.object({
         /** 该供应商密钥读哪个环境变量（密钥键名由配置控制）。 */
         apiKeyEnv: z.string().min(1),
         baseUrl: z.string(),
-        thinkingField: z.string().default('thinking'),
       }),
     ),
     models: z.record(z.string(), z.object({ provider: z.string(), model: z.string() })),
@@ -194,7 +188,7 @@ function loadLlmRouting(env: NodeJS.ProcessEnv): unknown {
       providers: Object.fromEntries(
         Object.entries(f.chat.providers).map(([key, p]) => [
           key,
-          { kind: p.kind, apiKey: secret(p.apiKeyEnv), baseUrl: p.baseUrl, thinkingField: p.thinkingField },
+          { kind: p.kind, apiKey: secret(p.apiKeyEnv), baseUrl: p.baseUrl },
         ]),
       ),
       models: f.chat.models,

@@ -15,8 +15,6 @@ export interface ResolvedModel {
   baseUrl: string
   /** 供应商侧真实模型 id（发给 API 的 model 字段）。 */
   modelId: string
-  /** thinking 字段名（DeepSeek 用）。 */
-  thinkingField: string
 }
 
 /**
@@ -27,19 +25,9 @@ export interface ResolvedModel {
 export function createChatProvider(rm: ResolvedModel): LLMCapability {
   switch (rm.providerKind) {
     case 'deepseek':
-      return new DeepSeekChatProvider({
-        apiKey: rm.apiKey,
-        baseUrl: rm.baseUrl,
-        model: rm.modelId,
-        thinkingField: rm.thinkingField,
-      })
+      return new DeepSeekChatProvider({ apiKey: rm.apiKey, baseUrl: rm.baseUrl, model: rm.modelId })
     case 'siliconflow':
-      // SiliconFlow 自带 thinking 形状（enable_thinking），不吃 thinkingField。
-      return new SiliconFlowChatProvider({
-        apiKey: rm.apiKey,
-        baseUrl: rm.baseUrl,
-        model: rm.modelId,
-      })
+      return new SiliconFlowChatProvider({ apiKey: rm.apiKey, baseUrl: rm.baseUrl, model: rm.modelId })
     default:
       // 类型上 providerKind 已被 config 的 z.enum 收窄；此处兜底未来漏接的 kind。
       throw new LlmError(`未接入的供应商 kind: ${rm.providerKind as string}`, 'provider')
