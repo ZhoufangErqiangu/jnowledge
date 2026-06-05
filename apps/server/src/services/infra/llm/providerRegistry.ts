@@ -1,4 +1,5 @@
 import { DeepSeekChatProvider } from './providers/deepseek.js'
+import { SiliconFlowChatProvider } from './providers/siliconflow.js'
 import { type LLMCapability, LlmError } from './types.js'
 
 /**
@@ -9,7 +10,7 @@ export interface ResolvedModel {
   /** 模型逻辑名（缓存与报错用）。 */
   key: string
   /** 供应商实现判别，第三层路由的依据。 */
-  providerKind: 'deepseek'
+  providerKind: 'deepseek' | 'siliconflow'
   apiKey: string
   baseUrl: string
   /** 供应商侧真实模型 id（发给 API 的 model 字段）。 */
@@ -31,6 +32,13 @@ export function createChatProvider(rm: ResolvedModel): LLMCapability {
         baseUrl: rm.baseUrl,
         model: rm.modelId,
         thinkingField: rm.thinkingField,
+      })
+    case 'siliconflow':
+      // SiliconFlow 自带 thinking 形状（enable_thinking），不吃 thinkingField。
+      return new SiliconFlowChatProvider({
+        apiKey: rm.apiKey,
+        baseUrl: rm.baseUrl,
+        model: rm.modelId,
       })
     default:
       // 类型上 providerKind 已被 config 的 z.enum 收窄；此处兜底未来漏接的 kind。

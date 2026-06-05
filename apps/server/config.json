@@ -8,17 +8,26 @@
           "apiKeyEnv": "DEEPSEEK_API_KEY",
           "baseUrl": "https://api.deepseek.com/v1",
           "thinkingField": "thinking"
+        },
+        "siliconflow": {
+          "kind": "siliconflow",
+          "apiKeyEnv": "SILICONFLOW_API_KEY",
+          "baseUrl": "https://api.siliconflow.cn/v1"
         }
       },
       "models": {
         "deepseek-v4-pro": { "provider": "deepseek", "model": "deepseek-v4-pro" },
-        "deepseek-v4-flash": { "provider": "deepseek", "model": "deepseek-v4-flash" }
+        "deepseek-v4-flash": { "provider": "deepseek", "model": "deepseek-v4-flash" },
+        "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B": {
+          "provider": "siliconflow",
+          "model": "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B"
+        }
       },
       "tiers": {
         "heavy": "deepseek-v4-pro",
         "standard": "deepseek-v4-flash",
         "light": "deepseek-v4-flash",
-        "nano": "deepseek-v4-flash"
+        "nano": "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B"
       }
     },
     "embedding": {

@@ -58,7 +58,7 @@ const configSchema = z.object({
         z.string(),
         z.object({
           /** 供应商实现判别；值对应一个 provider class。新增供应商在此扩枚举 + 写 class + providerRegistry 加 case。 */
-          kind: z.enum(['deepseek']).default('deepseek'),
+          kind: z.enum(['deepseek', 'siliconflow']).default('deepseek'),
           apiKey: z.string().optional(),
           baseUrl: z.string(),
           /**
@@ -125,7 +125,7 @@ const llmFileSchema = z.object({
     providers: z.record(
       z.string(),
       z.object({
-        kind: z.enum(['deepseek']).default('deepseek'),
+        kind: z.enum(['deepseek', 'siliconflow']).default('deepseek'),
         /** 该供应商密钥读哪个环境变量（密钥键名由配置控制）。 */
         apiKeyEnv: z.string().min(1),
         baseUrl: z.string(),
