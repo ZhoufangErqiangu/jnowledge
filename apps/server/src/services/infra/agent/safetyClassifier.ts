@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import type { LLMClient } from '../llm/types.js'
+import type { ChatService } from '../llm/types.js'
 
 /** 待判定的写操作描述。 */
 export interface OperationSpec {
@@ -33,14 +33,14 @@ const SYSTEM = [
   '只输出判定结果，不要执行任何操作，不要多余解释。',
 ].join('\n')
 
-export function createSafetyClassifier(llm: LLMClient): SafetyClassifier {
+export function createSafetyClassifier(chat: ChatService): SafetyClassifier {
   return {
     async classify(op) {
-      if (!llm.configured) {
+      if (!chat.configured) {
         return { risk: 'high', reason: '生成模型未配置，无法评估风险，按高风险要求确认' }
       }
       try {
-        return await llm.tier('standard').object(verdictSchema, {
+        return await chat.tier('standard').object(verdictSchema, {
           system: SYSTEM,
           prompt: `操作工具：${op.toolName}\n操作描述：${op.description}\n\n请判定风险等级。`,
           temperature: 0,

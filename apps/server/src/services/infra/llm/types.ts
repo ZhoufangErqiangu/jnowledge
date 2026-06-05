@@ -91,9 +91,9 @@ export interface GenerateOptions {
 }
 
 /**
- * ① 能力层（chat 侧）：所有 chat 供应商收敛到这一组能力。
+ * ① chat provider 契约：一个具体供应商（如 DeepSeek）实现这组能力（见 providers/）。
+ * 抽象在此声明，实现按供应商各自写 class——不再走「OpenAI 兼容」的统一适配器，换取最大控制力。
  * zod 是结构化输出的单一真相源（z.infer 类型 + 转 JSON Schema + 运行期校验）。
- * embed / rerank 属供应商全局能力，提到 LLMClient 顶层，不在 tier 句柄上。
  */
 export interface LLMCapability {
   text(opts: TextOptions): Promise<string>
@@ -103,24 +103,57 @@ export interface LLMCapability {
   generateStream(opts: GenerateOptions): AsyncIterable<AgentChunk>
 }
 
-/**
- * ② 层级路由 + 供应商全局能力。
- * 业务只声明 tier，tier→模型绑定集中在配置；embed/rerank 走另一侧供应商（SiliconFlow）。
- */
-export interface LLMClient {
-  /** 取某成本层级对应的 chat 能力句柄。 */
-  tier(tier: LlmTier): LLMCapability
-  /** 文本向量化（embedding 供应商）。返回与输入等长的向量数组。 */
-  embed(input: string | string[], opts?: EmbedOptions): Promise<number[][]>
-  /** 重排（rerank 供应商，Jina 形状）。返回命中的下标 + 分数，长度 ≤ topN。 */
+/** embedding provider 契约：按供应商各自实现（见 providers/）。 */
+export interface Embedder {
+  /** 文本向量化。model 可覆盖默认模型。返回与输入等长、按输入次序的向量数组。 */
+  embed(input: string | string[], model?: string): Promise<number[][]>
+}
+
+/** rerank provider 契约：按供应商各自实现（见 providers/）。 */
+export interface Reranker {
+  /** 重排。返回命中的下标 + 分数，长度 ≤ topN。 */
   rerank(query: string, documents: string[], topN: number): Promise<RerankHit[]>
+}
+
+/**
+ * ② 三领域 service。LLM 能力按领域拆分，各自独立配置/可用态：
+ *   - chat：tier→模型→供应商三层路由（见 chat.ts）
+ *   - embedding / rerank：各自一侧供应商的全局能力
+ * 与 config.llm.{chat,embedding,rerank} 一一对应。
+ */
+
+/** chat 领域：按成本层级取 chat 能力句柄。 */
+export interface ChatService {
+  /** 取某成本层级对应的 chat 能力句柄（内部走 tier→模型→供应商三层路由）。 */
+  tier(tier: LlmTier): LLMCapability
   /** chat 侧是否已配置可用供应商。 */
   readonly configured: boolean
-  /** embedding/rerank 侧是否已配置（SiliconFlow key）。 */
-  readonly embeddingConfigured: boolean
+}
+
+/** embedding 领域：文本向量化。 */
+export interface EmbeddingService {
+  /** 文本向量化。返回与输入等长的向量数组。 */
+  embed(input: string | string[], opts?: EmbedOptions): Promise<number[][]>
+  /** 是否已配置可用供应商。 */
+  readonly configured: boolean
   /** 当前 embedding 模型名与维度（写库 unique(chunk_id, model) 与建表维度用）。 */
-  readonly embeddingModel: string
-  readonly embeddingDim: number
+  readonly model: string
+  readonly dim: number
+}
+
+/** rerank 领域：重排（Jina 形状）。 */
+export interface RerankService {
+  /** 重排。返回命中的下标 + 分数，长度 ≤ topN。 */
+  rerank(query: string, documents: string[], topN: number): Promise<RerankHit[]>
+  /** 是否已配置可用供应商。 */
+  readonly configured: boolean
+}
+
+/** 三领域 service 聚合。业务按领域取用：llm.chat / llm.embedding / llm.rerank。 */
+export interface LLMClient {
+  chat: ChatService
+  embedding: EmbeddingService
+  rerank: RerankService
 }
 
 /** 统一错误 taxonomy。 */

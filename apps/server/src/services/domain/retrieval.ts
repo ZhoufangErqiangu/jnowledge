@@ -48,13 +48,13 @@ export function createRetrievalService(deps: RetrievalDeps): RetrievalService {
   const { vectorTopK, ftsTopK, rerankTopK, rrfK } = config.rag
 
   async function rewriteQuery(question: string, history: ChatMessage[]): Promise<string> {
-    if (!llm.configured || history.length === 0) return question
+    if (!llm.chat.configured || history.length === 0) return question
     const transcript = history
       .slice(-6)
       .map((m) => `${m.role === 'user' ? '用户' : '助手'}：${m.content}`)
       .join('\n')
     try {
-      const rewritten = await llm.tier('nano').text({
+      const rewritten = await llm.chat.tier('nano').text({
         system:
           '你是检索查询改写器。根据对话历史，把用户的最新追问改写成一个语义完整、可独立用于知识库检索的查询。消解指代（它/这个/那个等），补全省略的主语。只输出改写后的查询，不要解释。',
         prompt: `对话历史：\n${transcript}\n\n最新追问：${question}\n\n改写后的查询：`,
@@ -88,9 +88,9 @@ export function createRetrievalService(deps: RetrievalDeps): RetrievalService {
 
     // 4) rerank 精排（未配置则用 RRF 次序兜底）。
     let topChunks = ordered.slice(0, rerankTopK)
-    if (llm.embeddingConfigured && ordered.length > 0) {
+    if (llm.rerank.configured && ordered.length > 0) {
       try {
-        const hits = await llm.rerank(
+        const hits = await llm.rerank.rerank(
           query,
           ordered.map((e) => e.content),
           rerankTopK,
@@ -138,11 +138,11 @@ export function createRetrievalService(deps: RetrievalDeps): RetrievalService {
 
   /** 向量召回：query 向量化 + HNSW 近邻（embedding 未配置则空）。 */
   async function embedAndSearch(collectionId: string, query: string) {
-    if (!llm.embeddingConfigured) return []
+    if (!llm.embedding.configured) return []
     try {
-      const [vec] = await llm.embed(query)
+      const [vec] = await llm.embedding.embed(query)
       if (!vec) return []
-      return await vectorStore.query(collectionId, llm.embeddingModel, vec, vectorTopK)
+      return await vectorStore.query(collectionId, llm.embedding.model, vec, vectorTopK)
     } catch (err) {
       logger.warn({ err }, '向量召回失败，仅用全文召回')
       return []

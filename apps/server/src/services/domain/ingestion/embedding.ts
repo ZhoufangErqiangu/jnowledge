@@ -27,7 +27,7 @@ const CONTEXT_CONCURRENCY = 5
 export function createEmbeddingService(deps: EmbeddingDeps): EmbeddingService {
   const { config, db, models, infra, logger } = deps
   const { llm, vectorStore } = infra
-  const model = llm.embeddingModel
+  const model = llm.embedding.model
 
   /** Contextual Retrieval：用 light 模型为 chunk 生成在整篇文档中的定位上下文。 */
   async function buildContext(docContext: string, chunk: ChunkRow): Promise<string> {
@@ -41,7 +41,7 @@ export function createEmbeddingService(deps: EmbeddingDeps): EmbeddingService {
       '请用一两句中文给出该片段在整篇文档中的定位上下文（用于改善检索召回）。只输出该上下文，不要任何解释或前后缀。',
     ].join('\n')
     try {
-      const ctx = await llm.tier('light').text({ prompt, temperature: 0 })
+      const ctx = await llm.chat.tier('light').text({ prompt, temperature: 0 })
       return ctx.trim()
     } catch (err) {
       logger.warn({ chunkId: chunk.id, err }, 'contextual 上下文生成失败，回退为无上下文')
@@ -51,7 +51,7 @@ export function createEmbeddingService(deps: EmbeddingDeps): EmbeddingService {
 
   /** 把 chunk 列表转成待 embed 文本（含可选 contextual 前缀）。 */
   async function toEmbedTexts(versionContent: string, chunks: ChunkRow[]): Promise<string[]> {
-    const useContextual = config.rag.contextual && llm.configured
+    const useContextual = config.rag.contextual && llm.chat.configured
     if (!useContextual) return chunks.map((c) => c.content)
 
     const docContext = versionContent.slice(0, config.rag.contextMaxChars)
@@ -73,7 +73,7 @@ export function createEmbeddingService(deps: EmbeddingDeps): EmbeddingService {
   }
 
   async function embedVersion(versionId: string): Promise<number> {
-    if (!llm.embeddingConfigured) {
+    if (!llm.embedding.configured) {
       logger.warn({ versionId }, 'embedding 供应商未配置，跳过向量化（检索将无召回）')
       return 0
     }
@@ -88,7 +88,7 @@ export function createEmbeddingService(deps: EmbeddingDeps): EmbeddingService {
     let written = 0
     for (let i = 0; i < texts.length; i += EMBED_BATCH) {
       const slice = texts.slice(i, i + EMBED_BATCH)
-      const vectors = await llm.embed(slice)
+      const vectors = await llm.embedding.embed(slice)
       const items = vectors.map((embedding, j) => ({
         chunkId: chunks[i + j]!.id,
         embedding,

@@ -26,7 +26,7 @@ export function createApp(c: Container): Koa<AppState> {
   // 健康检查
   const sys = new Router<AppState>()
   sys.get('/health', (ctx) => {
-    ctx.body = { status: 'ok', llm: c.infra.llm.configured ? 'configured' : 'unconfigured' }
+    ctx.body = { status: 'ok', llm: c.infra.llm.chat.configured ? 'configured' : 'unconfigured' }
   })
   app.use(sys.routes())
   app.use(sys.allowedMethods())

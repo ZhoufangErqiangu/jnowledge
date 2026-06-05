@@ -99,7 +99,7 @@ const RUN_CHAR_BUDGET = 200_000
 export function createAgentService(deps: AgentDeps): AgentService {
   const { models, infra, logger, collectionService, documentService, retrieval } = deps
   const { llm } = infra
-  const classifier = createSafetyClassifier(llm)
+  const classifier = createSafetyClassifier(llm.chat)
 
   async function loadWithAccess(
     p: Principal,
@@ -164,7 +164,7 @@ export function createAgentService(deps: AgentDeps): AgentService {
       })
 
       // 降级：未配置 chat 供应商 → 不进 ReAct。知识库会话直接检索列片段；全局会话无固定库，仅提示。
-      if (!llm.configured) {
+      if (!llm.chat.configured) {
         const chunks = cv.collection_id ? await retrieval.retrieve(cv.collection_id, question) : []
         const answer = !cv.collection_id
           ? '（未配置生成模型，全局助手需要生成模型才能选库检索）'

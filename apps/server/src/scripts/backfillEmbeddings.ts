@@ -9,7 +9,7 @@ import { buildContainer } from '../container.js'
 async function main() {
   const config = loadConfig()
   const c = buildContainer(config)
-  if (!c.infra.llm.embeddingConfigured) {
+  if (!c.infra.llm.embedding.configured) {
     c.logger.error('embedding 供应商未配置（设置 SILICONFLOW_API_KEY），无法重建')
     process.exit(1)
   }

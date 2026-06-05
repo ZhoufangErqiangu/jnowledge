@@ -36,7 +36,7 @@ export async function* runAgent(
 
     let answer = ''
     let toolCalls: ToolCall[] | undefined
-    for await (const chunk of ctx.llm.tier(def.tier).generateStream({ messages, tools })) {
+    for await (const chunk of ctx.llm.chat.tier(def.tier).generateStream({ messages, tools })) {
       if (ctx.signal.aborted) return
       if (chunk.type === 'reasoning') {
         approxChars += chunk.delta.length

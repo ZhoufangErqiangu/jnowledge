@@ -135,7 +135,7 @@ export function createChatService(deps: ChatDeps): ChatService {
 
       // 生成。
       let answer = ''
-      if (!llm.configured) {
+      if (!llm.chat.configured) {
         // 未配置生成模型：降级为「列出检索片段」，仍可演示检索与引用。
         answer = chunks.length
           ? `（未配置生成模型，以下为检索到的相关片段）\n\n${chunks
@@ -149,7 +149,7 @@ export function createChatService(deps: ChatDeps): ChatService {
             ? `资料：\n${buildContextBlocks(chunks)}\n\n问题：${question}`
             : `（知识库未检索到相关资料）\n\n问题：${question}`
         const messages: ChatMessage[] = [...history, { role: 'user', content: userTurn }]
-        for await (const part of llm.tier('standard').textStream({
+        for await (const part of llm.chat.tier('standard').textStream({
           system: GENERATION_SYSTEM,
           messages,
         })) {
@@ -163,7 +163,7 @@ export function createChatService(deps: ChatDeps): ChatService {
       }
 
       // 引用校验 + 落库 assistant 消息。
-      const citations = llm.configured
+      const citations = llm.chat.configured
         ? validateCitations(answer, chunks)
         : chunks.map((c) => toCitation(c))
       yield { type: 'citations', citations }

@@ -1,0 +1,36 @@
+{
+  "_comment": "LLM 三层路由表。只放非密钥配置；密钥由各项的 apiKeyEnv 指向的环境变量提供。换环境用 LLM_CONFIG_PATH 指向另一个文件。",
+  "llm": {
+    "chat": {
+      "providers": {
+        "deepseek": {
+          "kind": "deepseek",
+          "apiKeyEnv": "DEEPSEEK_API_KEY",
+          "baseUrl": "https://api.deepseek.com/v1",
+          "thinkingField": "thinking"
+        }
+      },
+      "models": {
+        "deepseek-v4-pro": { "provider": "deepseek", "model": "deepseek-v4-pro" },
+        "deepseek-v4-flash": { "provider": "deepseek", "model": "deepseek-v4-flash" }
+      },
+      "tiers": {
+        "heavy": "deepseek-v4-pro",
+        "standard": "deepseek-v4-flash",
+        "light": "deepseek-v4-flash",
+        "nano": "deepseek-v4-flash"
+      }
+    },
+    "embedding": {
+      "apiKeyEnv": "SILICONFLOW_API_KEY",
+      "baseUrl": "https://api.siliconflow.cn/v1",
+      "model": "BAAI/bge-m3",
+      "dim": 1024
+    },
+    "rerank": {
+      "apiKeyEnv": "SILICONFLOW_API_KEY",
+      "baseUrl": "https://api.siliconflow.cn/v1",
+      "model": "BAAI/bge-reranker-v2-m3"
+    }
+  }
+}
