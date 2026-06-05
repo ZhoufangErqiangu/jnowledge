@@ -1,6 +1,5 @@
 import type { Selectable } from 'kysely'
-import type { DB } from '../db/index.js'
-import type { DocumentVersionsTable } from '../db/types.js'
+import type { DB, DocumentVersionsTable } from './schema.js'
 
 export type DocumentVersionRow = Selectable<DocumentVersionsTable>
 

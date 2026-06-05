@@ -1,6 +1,6 @@
 import type { Config } from '../../config/index.js'
 import type { Logger } from '../../logger.js'
-import type { DB } from '../../db/index.js'
+import type { DB } from '../../models/schema.js'
 import { createStorageService } from './storage.js'
 import { createJobQueue } from './jobs.js'
 import { createLLMClient } from './llm/index.js'

@@ -1,7 +1,6 @@
 import { sql, type Selectable } from 'kysely'
 import type { AgentRunStatus } from '@jnowledge/shared'
-import type { DB } from '../db/index.js'
-import type { AgentRunsTable } from '../db/types.js'
+import type { AgentRunsTable, DB } from './schema.js'
 
 export type AgentRunRow = Selectable<AgentRunsTable>
 

@@ -85,36 +85,5 @@ export type ContextItemKind = (typeof CONTEXT_ITEM_KINDS)[number]
 export const CONTEXT_ITEM_STATES = ['active', 'hidden'] as const
 export type ContextItemState = (typeof CONTEXT_ITEM_STATES)[number]
 
-/** context_items.meta 里持久化的工具调用（与 runtime 的 ToolCall 同形，可无损互转）。 */
-export interface ContextItemToolCall {
-  id: string
-  name: string
-  arguments: unknown
-}
-
-/**
- * context_items.meta 的结构（按 kind 取用不同子集）：
- * - assistant 轮：toolCalls（本轮发起的工具调用，供 v2 跨轮无损重建）。
- * - tool_result：seq/name/toolCallId/ok/error/summary/output（执行轨迹 + 诊断，取代 agent_steps）。
- */
-export interface ContextItemMeta {
-  toolCalls?: ContextItemToolCall[]
-  seq?: number
-  name?: string
-  toolCallId?: string
-  ok?: boolean
-  error?: string | null
-  summary?: string
-  /** 工具入参快照（诊断用，取代 agent_steps.input）。 */
-  input?: unknown
-  /** 工具结构化输出（诊断用；content 列存的是 LLM 实际看到的字符串）。 */
-  output?: unknown
-}
-
-/** context_items.flags：派生视图据此筛选；本期只写 state，其余留位。 */
-export interface ContextItemFlags {
-  state: ContextItemState
-  pinned?: boolean
-  protected?: boolean
-  summarized?: boolean
-}
+// context_items 的 jsonb 载荷形状（meta/flags/toolCall）是纯服务端持久化形状，
+// 不入跨平台契约，定义在 apps/server/src/db/contextItem.types.ts。

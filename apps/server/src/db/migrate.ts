@@ -2,6 +2,7 @@ import '../loadEnv.js'
 import { Migrator, type MigrationProvider } from 'kysely'
 import { loadConfig } from '../config/index.js'
 import { createDb } from './index.js'
+import type { Database } from '../models/schema.js'
 import { migrations } from './migrations/index.js'
 import { seedAdmin } from './seed.js'
 
@@ -15,7 +16,7 @@ const provider: MigrationProvider = {
 async function main() {
   const direction = process.argv[2] ?? 'up'
   const config = loadConfig()
-  const db = createDb(config)
+  const db = createDb<Database>(config)
   const migrator = new Migrator({ db, provider })
 
   const { error, results } =

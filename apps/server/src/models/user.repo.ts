@@ -1,7 +1,6 @@
 import { sql } from 'kysely'
 import type { Selectable } from 'kysely'
-import type { DB } from '../db/index.js'
-import type { UsersTable } from '../db/types.js'
+import type { DB, UsersTable } from './schema.js'
 import type { UserRole, UserStatus } from '@jnowledge/shared'
 
 export type UserRow = Selectable<UsersTable>

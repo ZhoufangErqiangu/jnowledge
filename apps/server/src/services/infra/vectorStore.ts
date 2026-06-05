@@ -1,5 +1,5 @@
 import { sql } from 'kysely'
-import type { DB } from '../../db/index.js'
+import type { DB } from '../../models/schema.js'
 
 /**
  * 向量检索隔离接口。二期落地 PgVectorStore（pgvector + HNSW cosine）。

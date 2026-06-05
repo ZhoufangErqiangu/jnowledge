@@ -1,17 +1,19 @@
 import { Kysely, PostgresDialect } from 'kysely'
 import pg from 'pg'
 import type { Config } from '../config/index.js'
-import type { Database } from './types.js'
-
-export type DB = Kysely<Database>
 
 /** 把 pg 的 numeric/int8 解析成 JS number（一期规模无大整数溢出风险）。 */
 pg.types.setTypeParser(pg.types.builtins.INT8, (v) => parseInt(v, 10))
 pg.types.setTypeParser(pg.types.builtins.NUMERIC, (v) => parseFloat(v))
 
-export function createDb(config: Config): DB {
+/**
+ * 通用持久化基础设施：连接 + 连接池 + 类型解析器，**schema 无关**。
+ * 具体 schema 由调用方（组合根）以泛型灌入——createDb<Database>(config)，
+ * Database/DB 定义在 models/schema.ts。db/ 不再 import 任何 app 类型。
+ */
+export function createDb<S>(config: Config): Kysely<S> {
   const pool = new pg.Pool({ connectionString: config.database.url, max: 10 })
-  return new Kysely<Database>({
+  return new Kysely<S>({
     dialect: new PostgresDialect({ pool }),
   })
 }

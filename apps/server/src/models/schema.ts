@@ -1,23 +1,24 @@
-import type { ColumnType, Generated, JSONColumnType } from 'kysely'
+import type { ColumnType, JSONColumnType, Kysely } from 'kysely'
 import type {
   AgentRunStatus,
-  Citation,
   CollectionRole,
   CollectionSettings,
   ContentFormat,
-  ContextItemFlags,
-  ContextItemKind,
-  ContextItemMeta,
   DocumentSourceType,
   DocumentStatus,
   UserRole,
   UserStatus,
 } from '@jnowledge/shared'
+import type { CreatedAt, DeletedAt, UpdatedAt } from './columns.js'
+// 表型随其 model 走；manifest 仅 import 做全局注册（Kysely 要求的唯一闭合全表映射）。
+import type { ContextItemsTable } from './contextItem.repo.js'
 
-/** 数据库生成 / 默认的时间戳：可选插入，selectable 为 Date。 */
-type CreatedAt = ColumnType<Date, Date | string | undefined, never>
-type UpdatedAt = ColumnType<Date, Date | string | undefined, Date | string>
-type DeletedAt = ColumnType<Date | null, Date | string | null | undefined, Date | string | null>
+/**
+ * 应用 schema：Kysely 全表映射 + 绑定后的 DB 类型。
+ * 类型与 db 解耦——db/ 是 schema 无关的通用基础设施（createDb<S> 泛型），
+ * 这里(models 层)才特化出具体 schema。createModels 是本类型的运行时孪生。
+ * （其余表型暂内联此处，后续像 ContextItem 一样逐张分发到各自 repo。）
+ */
 
 export interface UsersTable {
   id: string // UUIDv7，应用层生成
@@ -146,23 +147,6 @@ export interface AgentRunsTable {
   updated_at: UpdatedAt
 }
 
-/**
- * 统一上下文事件日志（五期：模型自管理上下文）。取代 messages + agent_steps。
- * citations/meta/flags 为 jsonb，插入时显式 JSON.stringify。
- */
-export interface ContextItemsTable {
-  id: string
-  conversation_id: string
-  // RAG 单轮路径为 null；run 删除时置 null（消息独立于 run 存活）。
-  run_id: ColumnType<string | null, string | null | undefined, string | null>
-  kind: ContextItemKind
-  content: string
-  citations: JSONColumnType<Citation[], Citation[] | string | undefined, Citation[] | string>
-  meta: JSONColumnType<ContextItemMeta, ContextItemMeta | string | undefined, ContextItemMeta | string>
-  flags: JSONColumnType<ContextItemFlags, ContextItemFlags | string | undefined, ContextItemFlags | string>
-  created_at: CreatedAt
-}
-
 /** 写操作两阶段确认的待确认记录。args 为工具入参快照（jsonb）。 */
 export interface PendingOperationsTable {
   id: string
@@ -197,4 +181,5 @@ export interface Database {
   pending_operations: PendingOperationsTable
 }
 
-export type { Generated }
+/** 具体 schema 绑定后的 Kysely 实例类型（全应用的 db 句柄类型）。 */
+export type DB = Kysely<Database>

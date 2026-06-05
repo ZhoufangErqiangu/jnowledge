@@ -1,7 +1,6 @@
 import { sql } from 'kysely'
 import type { Selectable } from 'kysely'
-import type { DB } from '../db/index.js'
-import type { DocumentsTable } from '../db/types.js'
+import type { DB, DocumentsTable } from './schema.js'
 import type { DocumentSourceType, DocumentStatus } from '@jnowledge/shared'
 
 export type DocumentRow = Selectable<DocumentsTable>

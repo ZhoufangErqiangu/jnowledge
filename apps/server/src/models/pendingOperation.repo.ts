@@ -1,6 +1,5 @@
 import { sql, type Selectable } from 'kysely'
-import type { DB } from '../db/index.js'
-import type { PendingOperationsTable } from '../db/types.js'
+import type { DB, PendingOperationsTable } from './schema.js'
 
 export type PendingOperationRow = Selectable<PendingOperationsTable>
 

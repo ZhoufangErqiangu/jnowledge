@@ -1,7 +1,6 @@
 import { sql } from 'kysely'
 import type { Selectable } from 'kysely'
-import type { DB } from '../db/index.js'
-import type { CollectionsTable } from '../db/types.js'
+import type { CollectionsTable, DB } from './schema.js'
 import type { CollectionSettings } from '@jnowledge/shared'
 
 export type CollectionRow = Selectable<CollectionsTable>

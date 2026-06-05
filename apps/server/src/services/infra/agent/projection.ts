@@ -1,5 +1,5 @@
-import type { Citation, ContextItemFlags, ContextItemKind, Message } from '@jnowledge/shared'
-import type { ContextItemRow } from '../../../models/contextItem.repo.js'
+import type { Citation, ContextItemKind, Message } from '@jnowledge/shared'
+import type { ContextItemFlags, ContextItemRow } from '../../../models/contextItem.repo.js'
 import type { AgentTurnMessage, ChatMessage } from '../llm/types.js'
 
 /**

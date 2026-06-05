@@ -1,4 +1,4 @@
-import type { DB } from '../db/index.js'
+import type { DB } from './schema.js'
 import { createUserRepo } from './user.repo.js'
 import { createCollectionRepo } from './collection.repo.js'
 import { createCollectionMemberRepo } from './collectionMember.repo.js'

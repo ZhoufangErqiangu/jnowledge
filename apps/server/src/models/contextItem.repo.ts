@@ -1,7 +1,65 @@
-import type { Selectable } from 'kysely'
-import type { Citation, ContextItemFlags, ContextItemKind, ContextItemMeta } from '@jnowledge/shared'
-import type { DB } from '../db/index.js'
-import type { ContextItemsTable } from '../db/types.js'
+import type { ColumnType, JSONColumnType, Selectable } from 'kysely'
+import type { Citation, ContextItemKind, ContextItemState } from '@jnowledge/shared'
+import type { DB } from './schema.js'
+import type { CreatedAt } from './columns.js'
+
+/**
+ * ContextItem 的表型 + jsonb 载荷形状 + Row/New + CRUD 全在此处。
+ * 类型归 models（与 repo 同处一文件，沿用现有 *.repo.ts 约定）；db/types.ts 的 Database
+ * manifest 仅 import 本表型做全局注册——这是 Kysely 要求的唯一闭合全表映射，不可消除。
+ * 条目/状态枚举仍来自 @jnowledge/shared（跨平台词汇）。
+ */
+
+/** context_items.meta 里持久化的工具调用（与 runtime 的 ToolCall 同形，可无损互转）。 */
+export interface ContextItemToolCall {
+  id: string
+  name: string
+  arguments: unknown
+}
+
+/**
+ * context_items.meta 的结构（按 kind 取用不同子集）：
+ * - assistant 轮：toolCalls（本轮发起的工具调用，供 v2 跨轮无损重建）。
+ * - tool_result：seq/name/toolCallId/ok/error/summary/output（执行轨迹 + 诊断，取代 agent_steps）。
+ */
+export interface ContextItemMeta {
+  toolCalls?: ContextItemToolCall[]
+  seq?: number
+  name?: string
+  toolCallId?: string
+  ok?: boolean
+  error?: string | null
+  summary?: string
+  /** 工具入参快照（诊断用，取代 agent_steps.input）。 */
+  input?: unknown
+  /** 工具结构化输出（诊断用；content 列存的是 LLM 实际看到的字符串）。 */
+  output?: unknown
+}
+
+/** context_items.flags：派生视图据此筛选；本期只写 state，其余留位。 */
+export interface ContextItemFlags {
+  state: ContextItemState
+  pinned?: boolean
+  protected?: boolean
+  summarized?: boolean
+}
+
+/**
+ * 统一上下文事件日志（五期：模型自管理上下文）。取代 messages + agent_steps。
+ * citations/meta/flags 为 jsonb，插入时显式 JSON.stringify（见 insert）。
+ */
+export interface ContextItemsTable {
+  id: string
+  conversation_id: string
+  // RAG 单轮路径为 null；run 删除时置 null（消息独立于 run 存活）。
+  run_id: ColumnType<string | null, string | null | undefined, string | null>
+  kind: ContextItemKind
+  content: string
+  citations: JSONColumnType<Citation[], Citation[] | string | undefined, Citation[] | string>
+  meta: JSONColumnType<ContextItemMeta, ContextItemMeta | string | undefined, ContextItemMeta | string>
+  flags: JSONColumnType<ContextItemFlags, ContextItemFlags | string | undefined, ContextItemFlags | string>
+  created_at: CreatedAt
+}
 
 export type ContextItemRow = Selectable<ContextItemsTable>
 

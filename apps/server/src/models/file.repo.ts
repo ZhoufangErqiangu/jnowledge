@@ -1,6 +1,5 @@
 import type { Selectable } from 'kysely'
-import type { DB } from '../db/index.js'
-import type { FilesTable } from '../db/types.js'
+import type { DB, FilesTable } from './schema.js'
 
 export type FileRow = Selectable<FilesTable>
 

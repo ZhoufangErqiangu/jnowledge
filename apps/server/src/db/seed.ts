@@ -1,6 +1,6 @@
 import { hash as bcryptHash } from '@liuhlightning/bcrypt'
 import { uuidv7 } from 'uuidv7'
-import type { DB } from './index.js'
+import type { DB } from '../models/schema.js'
 
 /** 固定引导管理员（数据库初始化时创建）。 */
 export const BOOTSTRAP_ADMIN = {

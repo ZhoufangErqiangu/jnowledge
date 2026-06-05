@@ -10,8 +10,8 @@ import {
   type PaginationQuery,
   type UpdateDocumentRequest,
 } from '@jnowledge/shared'
-import type { DB } from '../../db/index.js'
 import { createModels, type Models } from '../../models/index.js'
+import type { DB } from '../../models/schema.js'
 import {
   toChunk,
   toDocument,

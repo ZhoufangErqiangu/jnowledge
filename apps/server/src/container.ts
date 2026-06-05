@@ -1,7 +1,8 @@
 import type { Config } from './config/index.js'
 import { createLogger, type Logger } from './logger.js'
-import { createDb, type DB } from './db/index.js'
+import { createDb } from './db/index.js'
 import { createModels, type Models } from './models/index.js'
+import type { DB, Database } from './models/schema.js'
 import { createInfra, type Infra } from './services/infra/index.js'
 import { createAuthService, type AuthService } from './services/domain/auth.service.js'
 import {
@@ -43,7 +44,7 @@ export interface Container {
  */
 export function buildContainer(config: Config): Container {
   const logger = createLogger(config)
-  const db = createDb(config)
+  const db = createDb<Database>(config)
   const models = createModels(db)
   const infra = createInfra(config, logger, db)
 

@@ -1,7 +1,7 @@
 import { sql } from 'kysely'
 import type { Config } from '../../../config/index.js'
-import type { DB } from '../../../db/index.js'
 import type { Models } from '../../../models/index.js'
+import type { DB } from '../../../models/schema.js'
 import type { Infra } from '../../infra/index.js'
 import type { Logger } from '../../../logger.js'
 import type { ChunkRow } from '../../../models/chunk.repo.js'

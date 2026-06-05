@@ -1,6 +1,5 @@
 import { sql, type Selectable } from 'kysely'
-import type { DB } from '../db/index.js'
-import type { ConversationsTable } from '../db/types.js'
+import type { ConversationsTable, DB } from './schema.js'
 
 export type ConversationRow = Selectable<ConversationsTable>
 
