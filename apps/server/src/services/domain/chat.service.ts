@@ -3,6 +3,7 @@ import {
   ERROR_CODES,
   type ChatStreamEvent,
   type Citation,
+  type ContextDebug,
   type Conversation,
   type ConversationDetail,
   type CreateConversationRequest,
@@ -31,6 +32,8 @@ export interface ChatService {
   /** 全局会话列表（不绑库，仅 agent 模式）。 */
   listGlobalConversations(p: Principal): Promise<Conversation[]>
   getConversation(p: Principal, conversationId: string): Promise<ConversationDetail>
+  /** 调试：原始上下文（context_items 全量）+ 派生的推理视图 / 用户视图。 */
+  getContextDebug(p: Principal, conversationId: string): Promise<ContextDebug>
   removeConversation(p: Principal, conversationId: string): Promise<void>
   /** 流式问答：产出 SSE 事件序列；落库 user + assistant 消息。 */
   ask(p: Principal, conversationId: string, question: string): AsyncIterable<ChatStreamEvent>
@@ -139,6 +142,26 @@ export function createChatService(deps: ChatDeps): ChatService {
       const rewritten = await retrieval.rewriteQuery(question, history)
       const chunks = await retrieval.retrieve(collectionId, rewritten)
 
+      // 检索结果写回上下文（tool_result）——使原始上下文自包含：改写后的查询与命中片段
+      // 都留痕于全量日志（与 agent 路径的工具结果同构）。投影引擎跨轮不回放 tool_result，
+      // projectForUser 亦跳过 → 推理视图 / 用户视图行为不变，仅供调试与审计。
+      await models.contextItems.insert({
+        id: uuidv7(),
+        conversationId,
+        kind: 'tool_result',
+        // content 存 LLM 本轮实际看到的「资料」块（往返真相源）；结构化 chunks 进 meta.output。
+        content: chunks.length > 0 ? buildContextBlocks(chunks) : '（未检索到相关资料）',
+        meta: {
+          seq: 1,
+          name: 'knowledge_search',
+          ok: true,
+          error: null,
+          summary: `检索到 ${chunks.length} 个片段`,
+          input: { query: rewritten, collectionId },
+          output: chunks,
+        },
+      })
+
       // 生成。
       let answer = ''
       if (!llm.chat.configured) {
@@ -219,6 +242,35 @@ export function createChatService(deps: ChatDeps): ChatService {
       return {
         conversation: toConversation(cv),
         messages: projectForUser(items.map(toContextItemView)),
+      }
+    },
+
+    async getContextDebug(p, conversationId) {
+      // TODO(可观测性): system prompt 目前是请求时注入的静态常量（GENERATION_SYSTEM /
+      // agentDef.system），不入 context_items，故 raw/llmView 都看不到它。待推理流程定型后
+      // （system 将动态派生、并可能存在多层嵌套推理）再统一处理 system 与嵌套链路的可观测性，
+      // 届时需先回答「system 算原始上下文还是派生逻辑」。暂缓，避免给移动靶子绑死建模。
+      const cv = await loadWithAccess(p, conversationId, 'viewer')
+      // 原始上下文：context_items 全量、全序、未过滤（含 meta/flags）。
+      const rows = await models.contextItems.listByConversation(conversationId)
+      const views = rows.map(toContextItemView)
+      return {
+        conversation: toConversation(cv),
+        raw: rows.map((r) => ({
+          id: r.id,
+          conversationId: r.conversation_id,
+          runId: r.run_id,
+          kind: r.kind,
+          content: r.content,
+          citations: r.citations ?? [],
+          meta: (r.meta ?? {}) as Record<string, unknown>,
+          flags: r.flags ?? { state: 'active' },
+          createdAt: r.created_at.toISOString(),
+        })),
+        // 推理视图：投影引擎从原始上下文派生的跨轮历史（user/assistant 文本）。
+        llmView: projectForChat(views, HISTORY_CHAR_BUDGET),
+        // 用户视图：前端可见聊天记录。
+        userView: projectForUser(rows.map(toContextItemView)),
       }
     },
 

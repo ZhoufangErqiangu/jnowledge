@@ -57,6 +57,14 @@ async function send() {
     />
 
     <el-card class="msg-pane" shadow="never">
+      <div v-if="chat.currentId" class="pane-toolbar">
+        <router-link
+          :to="{ name: 'context-debug', params: { id: chat.currentId } }"
+          class="debug-link"
+        >
+          调试上下文
+        </router-link>
+      </div>
       <MessageList
         :messages="chat.messages"
         :streaming="chat.streaming"
@@ -93,5 +101,18 @@ async function send() {
   display: flex;
   flex-direction: column;
   height: 100%;
+}
+.pane-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  padding-bottom: 8px;
+}
+.debug-link {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  text-decoration: none;
+}
+.debug-link:hover {
+  color: var(--el-color-primary);
 }
 </style>

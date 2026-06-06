@@ -31,6 +31,11 @@ const router = createRouter({
           name: 'chat',
           component: () => import('@/views/ChatView.vue'),
         },
+        {
+          path: 'conversations/:id/debug',
+          name: 'context-debug',
+          component: () => import('@/views/ContextDebugView.vue'),
+        },
       ],
     },
   ],

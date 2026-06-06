@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { MESSAGE_ROLES } from '../constants/enums.js'
+import { CONTEXT_ITEM_KINDS, CONTEXT_ITEM_STATES, MESSAGE_ROLES } from '../constants/enums.js'
 import { isoDateSchema, uuidSchema } from './common.js'
 
 /**
@@ -65,6 +65,53 @@ export const conversationDetailSchema = z.object({
   messages: z.array(messageSchema),
 })
 export type ConversationDetail = z.infer<typeof conversationDetailSchema>
+
+/**
+ * 调试视图：原始上下文（context_items 全量条目，未经投影过滤）。
+ * 含 meta/flags——这两者在跨平台契约里本是服务端持久化形状，仅在调试 DTO 里
+ * 暴露给前端逐字段渲染（meta 宽松为 record；flags 显式列出已知 flag 字段）。
+ */
+export const contextItemDebugSchema = z.object({
+  id: uuidSchema,
+  conversationId: uuidSchema,
+  /** 所属 agent run；RAG 单轮路径为 null。 */
+  runId: uuidSchema.nullable(),
+  kind: z.enum(CONTEXT_ITEM_KINDS),
+  content: z.string(),
+  citations: z.array(citationSchema),
+  /** assistant 轮含 toolCalls；tool_result 含 seq/name/ok/error/summary/input/output。 */
+  meta: z.record(z.string(), z.unknown()),
+  flags: z.object({
+    state: z.enum(CONTEXT_ITEM_STATES),
+    pinned: z.boolean().optional(),
+    protected: z.boolean().optional(),
+    summarized: z.boolean().optional(),
+  }),
+  createdAt: isoDateSchema,
+})
+export type ContextItemDebug = z.infer<typeof contextItemDebugSchema>
+
+/** 推理视图里的一条消息（投影引擎从原始上下文派生，剥离 tool_calls）。 */
+export const llmViewMessageSchema = z.object({
+  role: z.enum(['system', 'user', 'assistant']),
+  content: z.string(),
+})
+export type LlmViewMessage = z.infer<typeof llmViewMessageSchema>
+
+/**
+ * 「一源三视图」调试载荷：同一份原始上下文（raw）派生出
+ * 推理视图（llmView，喂给 LLM）与用户视图（userView，前端可见聊天）。
+ */
+export const contextDebugSchema = z.object({
+  conversation: conversationSchema,
+  /** 原始上下文：context_items 全量、按 (created_at,id) 全序，未过滤。 */
+  raw: z.array(contextItemDebugSchema),
+  /** 推理视图：projectForChat 派生的跨轮历史（system 与当轮检索资料于请求时注入，不在此列）。 */
+  llmView: z.array(llmViewMessageSchema),
+  /** 用户视图：projectForUser 派生的可见聊天记录。 */
+  userView: z.array(messageSchema),
+})
+export type ContextDebug = z.infer<typeof contextDebugSchema>
 
 /**
  * SSE 事件载荷（前端解析 data: <json>）。type 区分：

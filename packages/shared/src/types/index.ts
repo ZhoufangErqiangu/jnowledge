@@ -39,6 +39,9 @@ export type {
   AskRequest,
   ConversationDetail,
   ChatStreamEvent,
+  ContextItemDebug,
+  LlmViewMessage,
+  ContextDebug,
 } from '../schemas/chat.js'
 export type { AgentRun, AgentStep, AgentAskRequest, AgentStreamEvent } from '../schemas/agent.js'
 

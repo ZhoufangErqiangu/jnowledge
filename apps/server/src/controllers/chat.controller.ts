@@ -32,6 +32,11 @@ export function createChatController(c: Container): Router<AppState> {
     ctx.body = await chat.getConversation(requirePrincipal(ctx.state), ctx.params.id!)
   })
 
+  // 调试：原始上下文 + 派生的推理视图 / 用户视图
+  router.get('/conversations/:id/context/debug', async (ctx) => {
+    ctx.body = await chat.getContextDebug(requirePrincipal(ctx.state), ctx.params.id!)
+  })
+
   // 删除会话（软删）
   router.delete('/conversations/:id', async (ctx) => {
     await chat.removeConversation(requirePrincipal(ctx.state), ctx.params.id!)
