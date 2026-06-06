@@ -1,85 +1,57 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
-import type {
-  Chunk,
-  DocumentDetail,
-  DocumentVersion,
-  DocumentVersionSummary,
-} from '@jnowledge/shared'
-import { documentsApi } from '@/apis/documents'
-import { ApiError } from '@/apis/http'
-import { formatDate, statusTagType } from '@/utils/format'
+import { useDocumentsStore } from '@/stores/documents'
+import { useApiAction } from '@/hooks/useApiAction'
+import { useCitationHighlight } from '@/hooks/useCitationHighlight'
+import { statusTagType } from '@/utils/format'
+import DocumentEditor from '@/components/documents/DocumentEditor.vue'
+import VersionHistory from '@/components/documents/VersionHistory.vue'
+import DocumentSource from '@/components/documents/DocumentSource.vue'
+import ChunkList from '@/components/documents/ChunkList.vue'
 
 const route = useRoute()
 const router = useRouter()
+const docs = useDocumentsStore()
+const { run } = useApiAction()
 const id = route.params.id as string
 
-const detail = ref<DocumentDetail | null>(null)
-const versions = ref<DocumentVersionSummary[]>([])
 const activeTab = ref('edit')
-
-// 编辑态
 const editTitle = ref('')
 const editContent = ref('')
 const saving = ref(false)
 
-// 选中版本的分块/全文
-const viewingVersion = ref<DocumentVersion | null>(null)
-const chunks = ref<Chunk[]>([])
-
-// 引用跳转：route.query.hl="start-end" 时在「原文」标签高亮该区间（复用一期精确 char 偏移）。
-const markEl = ref<HTMLElement | null>(null)
-const highlight = computed(() => {
-  const hl = route.query.hl as string | undefined
-  if (!hl) return null
-  const [s, e] = hl.split('-').map(Number)
-  if (Number.isNaN(s) || Number.isNaN(e)) return null
-  return { start: s, end: e }
-})
-const sourceParts = computed(() => {
-  const content = viewingVersion.value?.content
-  if (!content) return null
-  const h = highlight.value
-  if (!h) return { before: content, hit: '', after: '' }
-  return {
-    before: content.slice(0, h.start),
-    hit: content.slice(h.start, h.end),
-    after: content.slice(h.end),
-  }
-})
+// 原文标签的引用高亮（按 route.query.hl 的精确 char 偏移切分当前版本全文）。
+const { sourceParts } = useCitationHighlight(() => docs.viewingVersion?.content)
+const viewingVersionNo = computed(() => docs.viewingVersion?.versionNo ?? null)
+const sourceRef = ref<InstanceType<typeof DocumentSource> | null>(null)
 
 async function loadAll() {
-  try {
-    detail.value = await documentsApi.detail(id)
-    editTitle.value = detail.value.document.title
-    editContent.value = detail.value.currentVersion?.content ?? ''
-    versions.value = await documentsApi.versions(id)
-    const cur = detail.value.currentVersion
-    if (cur) await loadVersionChunks(cur.id)
-  } catch (e) {
-    ElMessage.error(e instanceof ApiError ? e.message : '加载失败')
-  }
+  await run(async () => {
+    const d = await docs.loadDetail(id)
+    editTitle.value = d.document.title
+    editContent.value = d.currentVersion?.content ?? ''
+    await docs.loadVersions(id)
+    if (d.currentVersion) await docs.loadVersionChunks(id, d.currentVersion.id)
+  }, '加载失败')
 }
 
-async function loadVersionChunks(versionId: string) {
-  viewingVersion.value = await documentsApi.version(id, versionId)
-  const res = await documentsApi.chunks(id, versionId)
-  chunks.value = res.items
+function selectVersion(versionId: string) {
+  run(() => docs.loadVersionChunks(id, versionId), '加载失败')
 }
 
 async function save() {
   saving.value = true
-  try {
-    await documentsApi.update(id, { title: editTitle.value, content: editContent.value })
-    ElMessage.success('已保存，新版本正在后台重新分块')
-    await loadAll()
-  } catch (e) {
-    ElMessage.error(e instanceof ApiError ? e.message : '保存失败')
-  } finally {
-    saving.value = false
-  }
+  const ok = await run(
+    async () => {
+      await docs.save(id, { title: editTitle.value, content: editContent.value })
+      return true
+    },
+    '保存失败',
+    '已保存，新版本正在后台重新分块',
+  )
+  if (ok) await loadAll()
+  saving.value = false
 }
 
 onMounted(async () => {
@@ -87,76 +59,40 @@ onMounted(async () => {
   // 从引用跳转进入：定位到指定版本并切到「原文」高亮。
   const v = route.query.version as string | undefined
   if (v) {
-    await loadVersionChunks(v)
+    await run(() => docs.loadVersionChunks(id, v), '加载失败')
     activeTab.value = 'source'
-    nextTick(() => markEl.value?.scrollIntoView({ block: 'center' }))
+    sourceRef.value?.scrollToHit()
   }
 })
 </script>
 
 <template>
-  <div v-if="detail" class="detail">
+  <div v-if="docs.detail" class="detail">
     <div class="head">
       <el-button text @click="router.back()">← 返回</el-button>
-      <h2 class="title">{{ detail.document.title }}</h2>
-      <el-tag :type="statusTagType(detail.document.status)">{{ detail.document.status }}</el-tag>
-      <span class="page-muted">{{ detail.chunkCount }} 个分块</span>
+      <h2 class="title">{{ docs.detail.document.title }}</h2>
+      <el-tag :type="statusTagType(docs.detail.document.status)">
+        {{ docs.detail.document.status }}
+      </el-tag>
+      <span class="page-muted">{{ docs.detail.chunkCount }} 个分块</span>
     </div>
-    <p v-if="detail.document.statusError" class="err">⚠ {{ detail.document.statusError }}</p>
+    <p v-if="docs.detail.document.statusError" class="err">⚠ {{ docs.detail.document.statusError }}</p>
 
     <el-tabs v-model="activeTab">
-      <!-- 编辑 -->
       <el-tab-pane label="编辑" name="edit">
-        <el-form label-position="top">
-          <el-form-item label="标题">
-            <el-input v-model="editTitle" />
-          </el-form-item>
-          <el-form-item label="正文（Markdown）">
-            <el-input v-model="editContent" type="textarea" :rows="18" />
-          </el-form-item>
-          <el-button type="primary" :loading="saving" @click="save">保存（生成新版本）</el-button>
-        </el-form>
+        <DocumentEditor v-model:title="editTitle" v-model:content="editContent" :saving="saving" @save="save" />
       </el-tab-pane>
 
-      <!-- 版本历史 -->
       <el-tab-pane label="版本历史" name="versions">
-        <el-table :data="versions" size="small" @row-click="(r: DocumentVersionSummary) => loadVersionChunks(r.id)">
-          <el-table-column label="版本" prop="versionNo" width="80" />
-          <el-table-column label="校验和" width="160">
-            <template #default="{ row }">
-              <code>{{ row.checksum.slice(0, 12) }}</code>
-            </template>
-          </el-table-column>
-          <el-table-column label="来源">
-            <template #default="{ row }">{{ row.sourceFileId ? '上传' : '手动编辑' }}</template>
-          </el-table-column>
-          <el-table-column label="时间" width="180">
-            <template #default="{ row }">{{ formatDate(row.createdAt) }}</template>
-          </el-table-column>
-        </el-table>
+        <VersionHistory :versions="docs.versions" @select="selectVersion" />
       </el-tab-pane>
 
-      <!-- 原文（引用高亮） -->
       <el-tab-pane label="原文" name="source">
-        <p v-if="viewingVersion" class="page-muted">版本 v{{ viewingVersion.versionNo }} 全文</p>
-        <pre v-if="sourceParts" class="source-body">{{ sourceParts.before
-          }}<mark v-if="sourceParts.hit" ref="markEl">{{ sourceParts.hit }}</mark>{{ sourceParts.after }}</pre>
-        <el-empty v-else description="暂无内容" />
+        <DocumentSource ref="sourceRef" :parts="sourceParts" :version-no="viewingVersionNo" />
       </el-tab-pane>
 
-      <!-- 分块 -->
-      <el-tab-pane :label="`分块 (${chunks.length})`" name="chunks">
-        <p v-if="viewingVersion" class="page-muted">
-          版本 v{{ viewingVersion.versionNo }} 的分块
-        </p>
-        <el-card v-for="c in chunks" :key="c.id" class="chunk" shadow="never">
-          <div class="chunk-meta page-muted">
-            #{{ c.seq }} · {{ c.tokenCount }} tokens · 字符 [{{ c.charStart }}, {{ c.charEnd }})
-            <span v-if="c.headingPath.length"> · {{ c.headingPath.join(' / ') }}</span>
-          </div>
-          <pre class="chunk-body">{{ c.content }}</pre>
-        </el-card>
-        <el-empty v-if="chunks.length === 0" description="暂无分块（可能还在处理中）" />
+      <el-tab-pane :label="`分块 (${docs.chunks.length})`" name="chunks">
+        <ChunkList :chunks="docs.chunks" :version-no="viewingVersionNo" />
       </el-tab-pane>
     </el-tabs>
   </div>
@@ -178,30 +114,5 @@ onMounted(async () => {
 }
 .err {
   color: #f56c6c;
-}
-.chunk {
-  margin-bottom: 10px;
-}
-.chunk-meta {
-  font-size: 12px;
-  margin-bottom: 6px;
-}
-.chunk-body {
-  white-space: pre-wrap;
-  word-break: break-word;
-  margin: 0;
-  font-family: inherit;
-}
-.source-body {
-  white-space: pre-wrap;
-  word-break: break-word;
-  margin: 0;
-  font-family: inherit;
-  line-height: 1.7;
-}
-.source-body mark {
-  background: var(--el-color-warning-light-5);
-  border-radius: 3px;
-  padding: 1px 2px;
 }
 </style>
