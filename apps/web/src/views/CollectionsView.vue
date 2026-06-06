@@ -95,9 +95,6 @@ usePolling(hasProcessing, () => documents.reload(), 2000)
         <div class="pane-head">
           <span>文档</span>
           <div v-if="selectedId" class="head-actions">
-            <el-button text type="primary" @click="router.push(`/collections/${selectedId}/chat`)">
-              问答
-            </el-button>
             <el-button text type="primary" @click="membersVisible = true">成员</el-button>
             <el-button text type="primary" @click="docVisible = true">新建文档</el-button>
             <el-upload :show-file-list="false" :http-request="httpRequest">

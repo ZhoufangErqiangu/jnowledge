@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { useRoute } from 'vue-router'
 import { useChatStore } from '@/stores/chat'
 import { useApiAction } from '@/hooks/useApiAction'
 import { useConfirmDelete } from '@/hooks/useConfirmDelete'
@@ -9,20 +8,16 @@ import ConversationList from '@/components/chat/ConversationList.vue'
 import MessageList from '@/components/chat/MessageList.vue'
 import ChatComposer from '@/components/chat/ChatComposer.vue'
 
-const route = useRoute()
 const chat = useChatStore()
 const { run } = useApiAction()
 const { confirmDelete } = useConfirmDelete()
 const { gotoCitation } = useCitationNav()
 
-// 无 collectionId 参数 → 全局助手（仅 agent，跨库检索）。
-const collectionId = (route.params.collectionId as string | undefined) ?? null
-
 const input = ref('')
 
 onMounted(() =>
   run(async () => {
-    await chat.loadConversations(collectionId)
+    await chat.loadConversations()
     if (chat.conversations.length > 0) await chat.open(chat.conversations[0]!.id)
   }, '加载失败'),
 )
@@ -50,7 +45,6 @@ async function send() {
     <ConversationList
       :conversations="chat.conversations"
       :current-id="chat.currentId"
-      :is-global="chat.isGlobal"
       @select="selectConversation"
       @create="chat.create()"
       @remove="removeConversation"
@@ -72,15 +66,9 @@ async function send() {
         :stream-reasoning="chat.streamReasoning"
         :stream-citations="chat.streamCitations"
         :stream-steps="chat.streamSteps"
-        :is-global="chat.isGlobal"
         @cite="gotoCitation"
       />
-      <ChatComposer
-        v-model="input"
-        :streaming="chat.streaming"
-        :is-global="chat.isGlobal"
-        @send="send"
-      />
+      <ChatComposer v-model="input" :streaming="chat.streaming" @send="send" />
     </el-card>
   </div>
 </template>

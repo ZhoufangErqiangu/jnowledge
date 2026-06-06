@@ -1,24 +1,18 @@
 import type {
-  ChatStreamEvent,
   ContextDebug,
   Conversation,
   ConversationDetail,
   CreateConversationRequest,
 } from '@jnowledge/shared'
 import { http } from './http'
-import { streamSSE } from './sse'
 
 export const chatApi = {
   async create(req: CreateConversationRequest): Promise<Conversation> {
     const { data } = await http.post<Conversation>('/conversations', req)
     return data
   },
-  async list(collectionId: string): Promise<Conversation[]> {
-    const { data } = await http.get<Conversation[]>(`/collections/${collectionId}/conversations`)
-    return data
-  },
-  /** 全局会话列表（不绑库，仅 agent 模式）。 */
-  async listGlobal(): Promise<Conversation[]> {
+  /** 我的会话列表（统一为全局 agent 会话）。 */
+  async list(): Promise<Conversation[]> {
     const { data } = await http.get<Conversation[]>('/conversations')
     return data
   },
@@ -33,20 +27,5 @@ export const chatApi = {
   async contextDebug(id: string): Promise<ContextDebug> {
     const { data } = await http.get<ContextDebug>(`/conversations/${id}/context/debug`)
     return data
-  },
-
-  /** RAG 提问（SSE 流式）。逐个事件回调 onEvent；流结束 resolve，可用 AbortSignal 中断。 */
-  async ask(
-    conversationId: string,
-    question: string,
-    onEvent: (ev: ChatStreamEvent) => void,
-    signal?: AbortSignal,
-  ): Promise<void> {
-    await streamSSE<ChatStreamEvent>(
-      `/conversations/${conversationId}/ask`,
-      { question },
-      onEvent,
-      signal,
-    )
   },
 }

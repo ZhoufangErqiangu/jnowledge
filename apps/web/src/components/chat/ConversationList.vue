@@ -6,7 +6,6 @@ import ConversationListItem from '@/components/chat/ConversationListItem.vue'
 defineProps<{
   conversations: Conversation[]
   currentId: string | null
-  isGlobal: boolean
 }>()
 const emit = defineEmits<{
   select: [id: string]
@@ -19,7 +18,7 @@ const emit = defineEmits<{
   <el-card class="cv-pane" shadow="never">
     <template #header>
       <div class="pane-head">
-        <span class="pane-label">{{ isGlobal ? '🌐 全局助手' : '会话' }}</span>
+        <span class="pane-label">🌐 全局助手</span>
         <el-button text type="primary" @click="emit('create')">+ 新会话</el-button>
       </div>
     </template>

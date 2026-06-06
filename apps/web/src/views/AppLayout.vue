@@ -22,6 +22,7 @@ function logout() {
     <el-header class="header">
       <div class="brand" @click="router.push('/collections')">📚 jnowledge</div>
       <el-button text @click="router.push('/collections')">知识库</el-button>
+      <el-button text @click="router.push('/search')">搜索</el-button>
       <el-button text @click="router.push('/chat')">全局助手</el-button>
       <div class="spacer" />
       <ThemeToggle />

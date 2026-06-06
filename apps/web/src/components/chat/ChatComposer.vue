@@ -1,9 +1,8 @@
 <script setup lang="ts">
-// 底部输入区：文本用 v-model 双向绑定，发送以事件上抛。
-// 模式由会话类型决定：全局会话=Agent（跨库自主编排），库内会话=RAG 单轮（无 agent）。
+// 底部输入区：文本用 v-model 双向绑定，发送以事件上抛。会话统一为全局 Agent（跨库自主编排）。
 const text = defineModel<string>({ required: true })
 
-defineProps<{ streaming: boolean; isGlobal: boolean }>()
+defineProps<{ streaming: boolean }>()
 const emit = defineEmits<{ send: [] }>()
 </script>
 
@@ -18,9 +17,7 @@ const emit = defineEmits<{ send: [] }>()
       @keydown.enter.exact.prevent="emit('send')"
     />
     <div class="composer-actions">
-      <el-tag size="small" :type="isGlobal ? 'success' : 'info'" effect="plain">
-        {{ isGlobal ? 'Agent' : 'RAG' }}
-      </el-tag>
+      <el-tag size="small" type="success" effect="plain">Agent</el-tag>
       <el-button type="primary" :loading="streaming" @click="emit('send')">发送</el-button>
     </div>
   </div>

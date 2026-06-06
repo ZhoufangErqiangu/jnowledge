@@ -13,7 +13,6 @@ const props = defineProps<{
   streamReasoning: string
   streamCitations: Citation[]
   streamSteps: TraceStep[]
-  isGlobal: boolean
 }>()
 const emit = defineEmits<{ cite: [citation: Citation] }>()
 
@@ -45,11 +44,7 @@ const { scroller } = useAutoScroll([
 
     <el-empty
       v-if="messages.length === 0 && !streaming"
-      :description="
-        isGlobal
-          ? '全局助手：自动选择相关知识库检索作答，并标注引用'
-          : '向该知识库提问，答案将基于库内文档并标注引用'
-      "
+      description="全局助手：自动选择相关知识库检索作答，并标注引用"
     />
   </div>
 </template>
