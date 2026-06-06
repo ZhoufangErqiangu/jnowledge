@@ -7,6 +7,7 @@ import { createCollectionController } from './collection.controller.js'
 import { createDocumentController } from './document.controller.js'
 import { createChatController } from './chat.controller.js'
 import { createAgentController } from './agent.controller.js'
+import { createSearchController } from './search.controller.js'
 
 /**
  * ★显式注册（硬约束）：禁止动态 require / fs 扫描。
@@ -18,6 +19,7 @@ const CONTROLLER_FACTORIES: ((c: Container) => Router<AppState>)[] = [
   createDocumentController,
   createChatController,
   createAgentController,
+  createSearchController,
 ]
 
 export function registerControllers(app: Koa<AppState>, c: Container): void {

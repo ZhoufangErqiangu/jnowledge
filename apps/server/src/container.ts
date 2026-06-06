@@ -14,6 +14,7 @@ import { createIngestionService, type IngestionService } from './services/domain
 import { createRetrievalService, type RetrievalService } from './services/domain/retrieval.js'
 import { createChatService, type ChatService } from './services/domain/chat.service.js'
 import { createAgentService, type AgentService } from './services/domain/agent.service.js'
+import { createSearchService, type SearchService } from './services/domain/search.service.js'
 import { requireAuth } from './middleware/auth.js'
 import type { AppMiddleware } from './http/state.js'
 
@@ -25,6 +26,7 @@ export interface Services {
   retrieval: RetrievalService
   chat: ChatService
   agent: AgentService
+  search: SearchService
 }
 
 export interface Container {
@@ -79,6 +81,7 @@ export function buildContainer(config: Config): Container {
     documentService: documents,
     retrieval,
   })
+  const search = createSearchService({ logger, collectionService: collections, retrieval })
 
   return {
     config,
@@ -86,7 +89,7 @@ export function buildContainer(config: Config): Container {
     db,
     models,
     infra,
-    services: { auth, collections, documents, ingestion, retrieval, chat, agent },
+    services: { auth, collections, documents, ingestion, retrieval, chat, agent, search },
     requireAuth: requireAuth(auth),
   }
 }
