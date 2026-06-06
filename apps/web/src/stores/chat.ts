@@ -24,10 +24,6 @@ export const useChatStore = defineStore('chat', () => {
   const currentId = ref<string | null>(null)
   const messages = ref<Message[]>([])
 
-  // Agent 模式开关：开 → 走自主编排的 agent 端点（带执行轨迹）；关 → 走 B 档 RAG。
-  // 全局模式下恒为 agent（无 RAG 可选）。
-  const agentMode = ref(false)
-
   // 流式中的助手草稿（未落库前的实时显示）。
   const streaming = ref(false)
   const streamText = ref('')
@@ -110,8 +106,8 @@ export const useChatStore = defineStore('chat', () => {
     }
 
     try {
-      // 全局会话只有 agent；知识库会话按开关。
-      if (isGlobal.value || agentMode.value) {
+      // 全局会话 → agent（跨库自主编排）；库内会话 → RAG 单轮。模式由会话类型唯一决定。
+      if (isGlobal.value) {
         await agentApi.ask(cid, question, (ev) => {
           if (ev.type === 'step_start') {
             streamSteps.value.push({
@@ -153,7 +149,6 @@ export const useChatStore = defineStore('chat', () => {
     conversations,
     currentId,
     messages,
-    agentMode,
     streaming,
     streamText,
     streamReasoning,

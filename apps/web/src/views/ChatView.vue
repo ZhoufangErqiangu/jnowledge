@@ -77,7 +77,6 @@ async function send() {
       />
       <ChatComposer
         v-model="input"
-        v-model:agent-mode="chat.agentMode"
         :streaming="chat.streaming"
         :is-global="chat.isGlobal"
         @send="send"
