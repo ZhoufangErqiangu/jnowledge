@@ -30,6 +30,53 @@ services:
     volumes:
       - miniodata:/data
 
+  # --- 应用全栈（profile: app）。默认 `docker compose up` 仍只起上面的基础设施；
+  #     部署/本地验证用 `docker compose --profile app up --build`。
+  #     同镜像两入口：migrate 一次性跑迁移→退出，app 等其成功后再起服务。---
+
+  # 一次性迁移/初始化容器：迁移到最新 + 幂等 seed admin，跑完即退出。
+  migrate:
+    profiles: [app]
+    image: jnowledge-server:latest
+    command: ['node', 'dist/db/migrate.js', 'latest']
+    restart: 'no'
+    env_file:
+      - path: apps/server/.env
+        required: false
+    environment:
+      # 容器网络内用服务名覆盖 .env 里的 localhost。
+      DATABASE_URL: postgres://jnowledge:jnowledge@postgres:5432/jnowledge
+      S3_ENDPOINT: http://minio:9000
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # 服务容器：与 migrate 共用同一镜像（仅此服务声明 build）。
+  app:
+    profiles: [app]
+    build:
+      context: .
+      dockerfile: apps/server/Dockerfile
+    image: jnowledge-server:latest
+    command: ['node', 'dist/main.js']
+    restart: unless-stopped
+    ports:
+      - '3000:3000'
+    env_file:
+      - path: apps/server/.env
+        required: false
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://jnowledge:jnowledge@postgres:5432/jnowledge
+      S3_ENDPOINT: http://minio:9000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_started
+      migrate:
+        condition: service_completed_successfully
+
 volumes:
   pgdata:
   miniodata:

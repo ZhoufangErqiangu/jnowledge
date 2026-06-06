@@ -5,14 +5,14 @@
   "type": "module",
   "exports": "./src/main.ts",
   "scripts": {
-    "dev": "node scripts/free-port.mjs 3000 && tsx watch src/main.ts",
+    "dev": "node scripts/free-port.mjs 3000 && NODE_OPTIONS=--conditions=development tsx watch src/main.ts",
     "free-port": "node scripts/free-port.mjs 3000",
     "start": "node dist/main.js",
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
-    "migrate": "tsx src/db/migrate.ts up",
-    "migrate:down": "tsx src/db/migrate.ts down",
-    "embed:backfill": "tsx src/scripts/backfillEmbeddings.ts"
+    "migrate": "NODE_OPTIONS=--conditions=development tsx src/db/migrate.ts up",
+    "migrate:down": "NODE_OPTIONS=--conditions=development tsx src/db/migrate.ts down",
+    "embed:backfill": "NODE_OPTIONS=--conditions=development tsx src/scripts/backfillEmbeddings.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.726.1",
