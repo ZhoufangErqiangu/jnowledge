@@ -5,6 +5,7 @@ import type {
   ChatMessage,
   GenerateOptions,
   LLMCapability,
+  LlmCallStat,
   LlmUsage,
   ObjectOptions,
   StreamChunk,
@@ -61,6 +62,7 @@ export abstract class OpenAIChatProvider implements LLMCapability {
   }
 
   async text(opts: TextOptions): Promise<string> {
+    const startedAt = Date.now()
     const res = await this.rawChat({
       model: opts.model ?? this.cfg.model,
       messages: buildMessages(opts),
@@ -69,6 +71,7 @@ export abstract class OpenAIChatProvider implements LLMCapability {
       ...(opts.maxTokens !== undefined ? { max_tokens: opts.maxTokens } : {}),
     })
     const json = (await res.json()) as ChatCompletion
+    emitStat(opts, startedAt, json.usage)
     // 仅返回最终答案；thinking 的 reasoning_content 在非流式下丢弃。
     return json.choices[0]?.message?.content ?? ''
   }
@@ -93,6 +96,8 @@ export abstract class OpenAIChatProvider implements LLMCapability {
     const baseMessages = buildMessages(opts)
 
     let lastErr = ''
+    // 跨重试计时：耗时归到整次 object() 调用（含降级/修复重试，反映真实代价）。
+    const startedAt = Date.now()
     for (let attempt = 0; attempt <= maxRepair; attempt++) {
       // 第 0 轮试原生 json_schema(strict)；其后用 json_object 并把 schema 文本注入 prompt
       // （多数 OpenAI 兼容供应商不支持 json_schema strict，且 json_object 要求 prompt 含 schema 约束与 "json" 字样）。
@@ -130,7 +135,10 @@ export abstract class OpenAIChatProvider implements LLMCapability {
       const parsed = safeJsonParse(raw)
       if (parsed.ok) {
         const result = schema.safeParse(parsed.value)
-        if (result.success) return result.data
+        if (result.success) {
+          emitStat(opts, startedAt, json.usage)
+          return result.data
+        }
         lastErr = result.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')
       } else {
         lastErr = '非合法 JSON'
@@ -206,6 +214,7 @@ function injectSchema(messages: ChatMessage[], schemaText: string, repairErr?: s
 
 interface ChatCompletion {
   choices: { message?: { content?: string; reasoning_content?: string } }[]
+  usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }
 }
 
 function safeJsonParse(raw: string): { ok: true; value: unknown } | { ok: false } {
@@ -300,6 +309,16 @@ function toLlmUsage(u: {
     completionTokens,
     totalTokens: u.total_tokens ?? promptTokens + completionTokens,
   }
+}
+
+/** 非流式调用成功时，向 opts.onStat 回报本次耗时 + token 用量（无回调则零开销）。 */
+function emitStat(
+  opts: { onStat?: (stat: LlmCallStat) => void },
+  startedAt: number,
+  usage: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | undefined,
+): void {
+  if (!opts.onStat) return
+  opts.onStat({ durationMs: Date.now() - startedAt, ...(usage ? { usage: toLlmUsage(usage) } : {}) })
 }
 
 /** 解析 OpenAI 风格 SSE 流，分离 reasoning_content / content 两路逐段 yield。 */

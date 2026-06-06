@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import type { ChatService } from '../llm/types.js'
+import type { ChatService, LlmCallStat } from '../llm/types.js'
 
 /**
  * 写操作审计-改写 stage（五期 §14.6 / DESIGN §8.5）。
@@ -32,9 +32,15 @@ export interface AuditVerdict {
   revised?: { toolName: string; args: Record<string, unknown> } | undefined
 }
 
+/** 审计结果：判决 + 本次 LLM 调用的耗时/用量（未真正调模型时 llm 缺省，如未配置/降级）。 */
+export interface AuditResult {
+  verdict: AuditVerdict
+  llm?: LlmCallStat
+}
+
 export interface OperationAuditor {
   /** 审计写操作。失败/未配置 → confirm（不静默放行，也不静默拒绝）。 */
-  audit(op: OperationSpec): Promise<AuditVerdict>
+  audit(op: OperationSpec): Promise<AuditResult>
 }
 
 const verdictSchema = z.object({
@@ -68,18 +74,23 @@ export function createOperationAuditor(chat: ChatService): OperationAuditor {
   return {
     async audit(op) {
       if (!chat.configured) {
-        return { decision: 'confirm', reason: '生成模型未配置，无法评估风险，按需确认' }
+        return { verdict: { decision: 'confirm', reason: '生成模型未配置，无法评估风险，按需确认' } }
       }
       try {
         const facts = op.facts ? `\n操作相关事实：${JSON.stringify(op.facts)}` : ''
         const intent = op.intent ? `\n用户近期意图：${op.intent}` : ''
-        return await chat.tier('nano').object(verdictSchema, {
+        let llm: LlmCallStat | undefined
+        const verdict = await chat.tier('nano').object(verdictSchema, {
           system: SYSTEM,
           prompt: `操作工具：${op.toolName}\n操作描述：${op.description}${facts}${intent}\n\n请审计该操作。`,
           temperature: 0,
+          onStat: (s) => {
+            llm = s
+          },
         })
+        return { verdict, ...(llm ? { llm } : {}) }
       } catch {
-        return { decision: 'confirm', reason: '风险评估调用失败，按需确认' }
+        return { verdict: { decision: 'confirm', reason: '风险评估调用失败，按需确认' } }
       }
     },
   }

@@ -7,7 +7,7 @@ import type { ContextItemRepo } from '../../../../models/contextItem.repo.js'
 import type { DocumentRepo } from '../../../../models/document.repo.js'
 import type { PendingOperationRepo } from '../../../../models/pendingOperation.repo.js'
 import type { AuditVerdict, OperationAuditor } from '../operationAuditor.js'
-import type { RunContext, Tool, ToolResult } from '../types.js'
+import type { LlmCallStat, RunContext, Tool, ToolResult } from '../types.js'
 import { inCeiling } from '../scope.js'
 
 export interface MutationToolDeps {
@@ -59,6 +59,7 @@ export function createMutationTools(deps: MutationToolDeps): Tool[] {
     source: 'deterministic' | 'auditor',
     ctx: RunContext,
     extra?: Record<string, unknown>,
+    llm?: LlmCallStat,
   ): Promise<void> {
     try {
       await contextItems.insert({
@@ -74,6 +75,8 @@ export function createMutationTools(deps: MutationToolDeps): Tool[] {
           input: { toolName: spec.name, description, source, ...extra },
           verdict,
           summary: verdict.reason,
+          // 仅 LLM 审计（auditor）有耗时/用量；确定性硬规则（deterministic）无 LLM 调用。
+          ...(llm ? { llm } : {}),
         },
       })
     } catch {
@@ -465,8 +468,8 @@ export function createMutationTools(deps: MutationToolDeps): Tool[] {
     }
 
     const intent = await gatherIntent(ctx)
-    const verdict = await auditor.audit({ toolName: spec.name, description, facts, intent })
-    await recordVerdict(spec, description, verdict, 'auditor', ctx, { facts })
+    const { verdict, llm } = await auditor.audit({ toolName: spec.name, description, facts, intent })
+    await recordVerdict(spec, description, verdict, 'auditor', ctx, { facts }, llm)
 
     if (verdict.decision === 'reject') return rejectResult(description, verdict.reason)
 

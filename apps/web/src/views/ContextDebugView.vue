@@ -205,6 +205,20 @@ function back() {
               <el-tag v-if="agentNameOf(it.runId)" size="small" effect="plain" type="info">
                 {{ agentNameOf(it.runId) }}
               </el-tag>
+              <span v-if="llmStat(it)" class="llm-stat">
+                <span class="llm-pill" title="本次子推理 LLM 调用 wall-clock 耗时">
+                  ⏱ {{ fmtDuration(llmStat(it)!.durationMs) }}
+                </span>
+                <span
+                  v-if="llmStat(it)!.usage"
+                  class="llm-pill"
+                  title="token 用量：输入(prompt) / 输出(completion) / 合计"
+                >
+                  🔢 {{ fmtTokens(llmStat(it)!.usage!.totalTokens) }} tok
+                  (↑{{ fmtTokens(llmStat(it)!.usage!.promptTokens) }}
+                  ↓{{ fmtTokens(llmStat(it)!.usage!.completionTokens) }})
+                </span>
+              </span>
               <span class="ts">{{ new Date(it.createdAt).toLocaleString() }}</span>
             </div>
 

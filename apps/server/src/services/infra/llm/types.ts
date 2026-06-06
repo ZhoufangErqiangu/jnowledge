@@ -8,6 +8,15 @@ export interface LlmUsage {
   totalTokens: number
 }
 
+/**
+ * 一次 LLM 调用的耗时 + token 用量（诊断/成本归因；落 context_items.meta.llm，调试上下文展示）。
+ * durationMs 恒有（wall-clock 实测）；usage 在供应商不回报用量时缺省。
+ */
+export interface LlmCallStat {
+  usage?: LlmUsage
+  durationMs: number
+}
+
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant'
   content: string
@@ -55,6 +64,11 @@ export interface TextOptions {
   thinking?: Thinking
   /** 覆盖默认模型（一般不用，tier 已绑模型） */
   model?: string
+  /**
+   * 非流式调用（text/object）的统计回调：调用成功时回报本次耗时 + token 用量。
+   * 供需要落库/归因的调用方按需传入；不传则零开销。流式路径（generateStream）自带 usage 分段，不走此回调。
+   */
+  onStat?: (stat: LlmCallStat) => void
 }
 
 export interface ObjectOptions extends TextOptions {

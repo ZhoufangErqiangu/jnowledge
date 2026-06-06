@@ -1,7 +1,9 @@
 import type { z } from 'zod'
 import type { Citation, LlmTier } from '@jnowledge/shared'
 import type { Logger } from '../../../logger.js'
-import type { LLMClient, LlmUsage, ToolCall, ToolSpec } from '../llm/types.js'
+import type { LLMClient, LlmCallStat, ToolCall, ToolSpec } from '../llm/types.js'
+
+export type { LlmCallStat }
 
 /** 工具/子 agent 执行结果。 */
 export interface ToolResult {
@@ -78,15 +80,6 @@ export interface RunContext {
   logger: Logger
   /** 全 run 共享的引用聚合器；工具向其追加并分配全局 marker。 */
   citations: Citation[]
-}
-
-/**
- * 一次 LLM 调用的耗时与 token 用量（每个 ReAct 步 = 一次调用；挂到该轮 assistant 条目 meta.llm）。
- * usage 在供应商不回报用量时为 undefined；durationMs 恒有（wall-clock 实测）。
- */
-export interface LlmCallStat {
-  usage?: LlmUsage
-  durationMs: number
 }
 
 /** runtime 产出的事件（service 翻成 AgentStreamEvent 并落 context_items）。 */
