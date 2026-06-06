@@ -3,6 +3,7 @@ import type { Citation } from '@jnowledge/shared'
 import type { TraceStep } from '@/stores/chat'
 import MarkdownContent from '@/components/MarkdownContent.vue'
 import CitationTags from '@/components/chat/CitationTags.vue'
+import ReasoningPanel from '@/components/chat/ReasoningPanel.vue'
 
 // 流式草稿气泡：Agent 执行轨迹 + 思考过程 + 增量正文（带闪烁 caret）+ 引用。
 defineProps<{
@@ -28,11 +29,7 @@ const emit = defineEmits<{ cite: [citation: Citation] }>()
           </div>
         </el-collapse-item>
       </el-collapse>
-      <el-collapse v-if="reasoning" class="reasoning">
-        <el-collapse-item title="思考过程">
-          <pre class="reasoning-body">{{ reasoning }}</pre>
-        </el-collapse-item>
-      </el-collapse>
+      <ReasoningPanel :reasoning="reasoning" />
       <div class="md-line">
         <MarkdownContent :source="text" /><span class="caret">▍</span>
       </div>
@@ -70,16 +67,6 @@ const emit = defineEmits<{ cite: [citation: Citation] }>()
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.reasoning {
-  margin-bottom: 8px;
-}
-.reasoning-body {
-  white-space: pre-wrap;
-  word-break: break-word;
-  margin: 0;
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
 }
 .caret {
   animation: blink 1s step-start infinite;

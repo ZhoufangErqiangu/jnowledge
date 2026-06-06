@@ -99,6 +99,7 @@ export const useChatStore = defineStore('chat', () => {
           conversationId: cid,
           role: 'assistant',
           content: streamText.value,
+          ...(streamReasoning.value ? { reasoning: streamReasoning.value } : {}),
           citations: streamCitations.value,
           createdAt: new Date().toISOString(),
         })

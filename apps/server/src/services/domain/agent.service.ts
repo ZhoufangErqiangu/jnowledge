@@ -1,6 +1,7 @@
 import { uuidv7 } from 'uuidv7'
 import { ERROR_CODES, type AgentStreamEvent, type Citation } from '@jnowledge/shared'
 import type { Models } from '../../models/index.js'
+import type { ContextItemMeta } from '../../models/contextItem.repo.js'
 import type { Infra } from '../infra/index.js'
 import type { Logger } from '../../logger.js'
 import {
@@ -233,21 +234,30 @@ export function createAgentService(deps: AgentDeps): AgentService {
       })
 
       let answer = ''
+      // 本轮（当前 LLM 调用）思考过程累积；落到该轮 assistant 的 meta.reasoning 后清空。
+      let turnReasoning = ''
       const inputBySeq = new Map<number, unknown>()
       for await (const ev of runAgent(agentDef, initialMessages, ctx)) {
         switch (ev.type) {
-          case 'assistant':
-            // 中间 assistant 轮（发起了工具调用）：全量落库，toolCalls 进 meta 供诊断/v2 重建。
+          case 'assistant': {
+            // 中间 assistant 轮（发起了工具调用）：全量落库，toolCalls + 本轮思考进 meta 供诊断/v2 重建。
+            const meta: ContextItemMeta = {
+              ...(ev.toolCalls ? { toolCalls: ev.toolCalls } : {}),
+              ...(turnReasoning ? { reasoning: turnReasoning } : {}),
+            }
             await models.contextItems.insert({
               id: uuidv7(),
               conversationId,
               runId,
               kind: 'assistant',
               content: ev.content ?? '',
-              ...(ev.toolCalls ? { meta: { toolCalls: ev.toolCalls } } : {}),
+              ...(Object.keys(meta).length ? { meta } : {}),
             })
+            turnReasoning = ''
             break
+          }
           case 'reasoning':
+            turnReasoning += ev.delta
             yield { type: 'reasoning', delta: ev.delta }
             break
           case 'text':
@@ -299,6 +309,7 @@ export function createAgentService(deps: AgentDeps): AgentService {
         kind: 'assistant',
         content: answer,
         citations: finalCitations,
+        ...(turnReasoning ? { meta: { reasoning: turnReasoning } } : {}),
       })
       await models.agentRuns.complete(runId, assistant.id)
       await models.conversations.touch(conversationId)

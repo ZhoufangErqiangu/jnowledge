@@ -24,6 +24,8 @@ export interface ContextItemView {
   kind: ContextItemKind
   content: string
   citations: Citation[]
+  /** assistant 轮思考过程（meta.reasoning），仅用户视图展示用。 */
+  reasoning?: string
   flags: ContextItemFlags
   createdAt: Date
 }
@@ -36,6 +38,7 @@ export function toContextItemView(r: ContextItemRow): ContextItemView {
     kind: r.kind,
     content: r.content,
     citations: r.citations ?? [],
+    ...(r.meta?.reasoning ? { reasoning: r.meta.reasoning } : {}),
     flags: r.flags ?? { state: 'active' },
     createdAt: r.created_at,
   }
@@ -106,6 +109,7 @@ export function projectForUser(items: ContextItemView[]): Message[] {
       conversationId: it.conversationId,
       role: it.kind,
       content: it.content,
+      ...(it.reasoning ? { reasoning: it.reasoning } : {}),
       citations: it.citations,
       createdAt: it.createdAt.toISOString(),
     })

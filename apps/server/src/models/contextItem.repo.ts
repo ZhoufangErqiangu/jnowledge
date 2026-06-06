@@ -19,11 +19,13 @@ export interface ContextItemToolCall {
 
 /**
  * context_items.meta 的结构（按 kind 取用不同子集）：
- * - assistant 轮：toolCalls（本轮发起的工具调用，供 v2 跨轮无损重建）。
+ * - assistant 轮：toolCalls（本轮发起的工具调用，供 v2 跨轮无损重建）+ reasoning（本轮思考过程）。
  * - tool_result：seq/name/toolCallId/ok/error/summary/output（执行轨迹 + 诊断，取代 agent_steps）。
  */
 export interface ContextItemMeta {
   toolCalls?: ContextItemToolCall[]
+  /** assistant 轮的思考过程（thinking 开时）。不入 LLM/用户内容投影，仅展示/审计。 */
+  reasoning?: string
   seq?: number
   name?: string
   toolCallId?: string

@@ -87,7 +87,7 @@ function back() {
             </div>
 
             <el-collapse v-if="hasMeta(it.meta)" class="meta-collapse">
-              <el-collapse-item :title="`meta（工具调用 / 执行轨迹）`">
+              <el-collapse-item :title="`meta（工具调用 / 执行轨迹 / 思考过程）`">
                 <pre class="json">{{ pretty(it.meta) }}</pre>
               </el-collapse-item>
             </el-collapse>

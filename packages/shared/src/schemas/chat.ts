@@ -27,6 +27,8 @@ export const messageSchema = z.object({
   conversationId: uuidSchema,
   role: z.enum(MESSAGE_ROLES),
   content: z.string(),
+  /** assistant 轮的思考过程（thinking 开时），仅展示用；不计入 LLM 历史。 */
+  reasoning: z.string().optional(),
   citations: z.array(citationSchema),
   createdAt: isoDateSchema,
 })

@@ -2,6 +2,7 @@
 import type { Citation, Message } from '@jnowledge/shared'
 import MarkdownContent from '@/components/MarkdownContent.vue'
 import CitationTags from '@/components/chat/CitationTags.vue'
+import ReasoningPanel from '@/components/chat/ReasoningPanel.vue'
 import { formatDate } from '@/utils/format'
 
 // 单条已落库消息：用户消息纯文本，助手消息按 Markdown 渲染并带引用。
@@ -12,6 +13,10 @@ const emit = defineEmits<{ cite: [citation: Citation] }>()
 <template>
   <div class="msg" :class="message.role">
     <div class="bubble">
+      <ReasoningPanel
+        v-if="message.role === 'assistant' && message.reasoning"
+        :reasoning="message.reasoning"
+      />
       <MarkdownContent v-if="message.role === 'assistant'" :source="message.content" />
       <div v-else class="content">{{ message.content }}</div>
       <CitationTags :citations="message.citations" @select="emit('cite', $event)" />

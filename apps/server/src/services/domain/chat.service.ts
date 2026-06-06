@@ -164,6 +164,7 @@ export function createChatService(deps: ChatDeps): ChatService {
 
       // 生成。
       let answer = ''
+      let reasoning = ''
       if (!llm.chat.configured) {
         // 未配置生成模型：降级为「列出检索片段」，仍可演示检索与引用。
         answer = chunks.length
@@ -183,6 +184,7 @@ export function createChatService(deps: ChatDeps): ChatService {
           messages,
         })) {
           if (part.type === 'reasoning') {
+            reasoning += part.delta
             yield { type: 'reasoning', delta: part.delta }
           } else {
             answer += part.delta
@@ -203,6 +205,7 @@ export function createChatService(deps: ChatDeps): ChatService {
         kind: 'assistant',
         content: answer,
         citations,
+        ...(reasoning ? { meta: { reasoning } } : {}),
       })
       await models.conversations.touch(conversationId)
       yield { type: 'done', messageId: assistant.id }
