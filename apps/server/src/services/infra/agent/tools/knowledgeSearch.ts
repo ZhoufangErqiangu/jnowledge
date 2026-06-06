@@ -1,9 +1,11 @@
 import { z } from 'zod'
+import { uuidv7 } from 'uuidv7'
 import type { Citation } from '@jnowledge/shared'
+import type { ContextItemRepo } from '../../../../models/contextItem.repo.js'
 import type { CollectionService } from '../../../domain/collection.service.js'
 import type { RetrievalService, RetrievedChunk } from '../../../domain/retrieval.js'
-import type { RelevanceFilter } from '../relevanceFilter.js'
-import type { Tool, ToolResult } from '../types.js'
+import type { FilterResult, RelevanceFilter } from '../relevanceFilter.js'
+import type { RunContext, Tool, ToolResult } from '../types.js'
 import { inCeiling, outOfScope } from '../scope.js'
 
 const paramsSchema = z.object({
@@ -25,7 +27,40 @@ export function createKnowledgeSearchTool(
   retrieval: RetrievalService,
   collectionService: CollectionService,
   filter: RelevanceFilter,
+  contextItems: ContextItemRepo,
 ): Tool {
+  /**
+   * 把过滤判决落成 internal 条目（stage=rag_filter）：留痕于 raw 视图与 run 树，但不进 LLM/用户视图。
+   * 与安全审计同属"第三状态"子推理留痕（DESIGN §8.3 / PLAN §14.3）——堵住"过滤结果产生即丢"的洞。
+   * 仅在过滤实际执行（applied）时落；命中过少/未配置（applied=false）无 LLM 调用，不留痕。
+   */
+  async function recordFilterTrace(
+    ctx: RunContext,
+    query: string,
+    result: FilterResult,
+  ): Promise<void> {
+    try {
+      await contextItems.insert({
+        id: uuidv7(),
+        conversationId: ctx.conversationId,
+        runId: ctx.runId,
+        kind: 'tool_result',
+        content: `RAG 相关性过滤：保留 ${result.kept.length} / 丢弃 ${result.dropped.length}（查询：${query}）`,
+        flags: { state: 'internal' },
+        meta: {
+          stage: 'rag_filter',
+          name: 'knowledge_search',
+          input: { query },
+          verdict: { kept: result.kept.length, dropped: result.dropped },
+          summary: `保留 ${result.kept.length} / 丢弃 ${result.dropped.length}`,
+          ...(result.llm ? { llm: result.llm } : {}),
+        },
+      })
+    } catch {
+      // 落库失败不应阻断检索主流程（留痕是旁路）。
+    }
+  }
+
   return {
     name: 'knowledge_search',
     description:
@@ -48,7 +83,10 @@ export function createKnowledgeSearchTool(
       }
       const hits = await retrieval.retrieve(target, query)
       // 抽取式相关性过滤（§14.4）：agent 见到的也是过滤后结果；marker 在过滤后再分配。
-      const { kept: chunks } = await filter.filter(query, hits)
+      const result = await filter.filter(query, hits)
+      const { kept: chunks } = result
+      // 过滤子推理留痕（含耗时/用量）：仅在过滤实际执行时落 internal 条目。
+      if (result.applied) await recordFilterTrace(ctx, query, result)
       if (chunks.length === 0) {
         return {
           ok: true,

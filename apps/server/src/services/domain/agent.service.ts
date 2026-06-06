@@ -188,7 +188,7 @@ export function createAgentService(deps: AgentDeps): AgentService {
 
       // 装配工具注册表（全集；agent 按 toolNames 授予子集）+ run 上下文。
       const registry = createToolRegistry([
-        createKnowledgeSearchTool(retrieval, collectionService, relevanceFilter),
+        createKnowledgeSearchTool(retrieval, collectionService, relevanceFilter, models.contextItems),
         createGetDocumentTool(models, collectionService),
         createListCollectionsTool(collectionService),
         ...createMutationTools({

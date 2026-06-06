@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import type { RetrievedChunk } from '../../domain/retrieval.js'
-import type { ChatService } from '../llm/types.js'
+import type { ChatService, LlmCallStat } from '../llm/types.js'
 
 /**
  * RAG 抽取式相关性过滤（五期 §14.4 / DESIGN §8.1·2）：检索命中后、拼进生成上下文前，
@@ -17,6 +17,11 @@ export interface FilterResult {
   dropped: { marker: number; documentTitle: string; reason: string }[]
   /** 是否触发了过滤（false=命中过少/未配置，直接放行）。 */
   applied: boolean
+  /**
+   * 过滤子推理的 LLM 统计：逐片段并行二分类的聚合——usage 各分项求和（全程 token 总耗），
+   * durationMs 为整批 wall-clock（并行，约等于最慢一条）。未触发过滤（applied=false）时缺省。
+   */
+  llm?: LlmCallStat
 }
 
 export interface RelevanceFilter {
@@ -48,6 +53,14 @@ export function createRelevanceFilter(
         return { kept: chunks, dropped: [], applied: false }
       }
 
+      // 逐片段统计聚合：usage 各分项求和，durationMs 取整批 wall-clock（并行）。
+      // onStat 回调在各自 object() resolve 时同步触发，单线程累加无竞态。
+      let promptTokens = 0
+      let completionTokens = 0
+      let totalTokens = 0
+      let sawUsage = false
+      const startedAt = Date.now()
+
       // per-chunk 并行二分类。
       const decisions = await Promise.all(
         chunks.map(async (c) => {
@@ -56,6 +69,14 @@ export function createRelevanceFilter(
               system: SYSTEM,
               prompt: `检索查询：${query}\n\n候选资料《${c.documentTitle}》：\n${c.context}\n\n该资料是否与查询相关？`,
               temperature: 0,
+              onStat: (s) => {
+                if (s.usage) {
+                  sawUsage = true
+                  promptTokens += s.usage.promptTokens
+                  completionTokens += s.usage.completionTokens
+                  totalTokens += s.usage.totalTokens
+                }
+              },
             })
             return d
           } catch {
@@ -65,6 +86,11 @@ export function createRelevanceFilter(
         }),
       )
 
+      const llm: LlmCallStat = {
+        durationMs: Date.now() - startedAt,
+        ...(sawUsage ? { usage: { promptTokens, completionTokens, totalTokens } } : {}),
+      }
+
       const kept: RetrievedChunk[] = []
       const dropped: FilterResult['dropped'] = []
       chunks.forEach((c, i) => {
@@ -72,7 +98,7 @@ export function createRelevanceFilter(
         if (d.keep) kept.push(c)
         else dropped.push({ marker: c.marker, documentTitle: c.documentTitle, reason: d.reason })
       })
-      return { kept, dropped, applied: true }
+      return { kept, dropped, applied: true, llm }
     },
   }
 }
