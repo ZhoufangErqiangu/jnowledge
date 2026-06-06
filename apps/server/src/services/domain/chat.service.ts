@@ -14,7 +14,6 @@ import type { Logger } from '../../logger.js'
 import type { ChatMessage } from '../infra/llm/types.js'
 import {
   RAG_GENERATION_TEMPLATE,
-  assembleSystemPrompt,
   createRelevanceFilter,
   projectForChat,
   projectForUser,
@@ -206,8 +205,8 @@ export function createChatService(deps: ChatDeps): ChatService {
             ? `资料：\n${buildContextBlocks(chunks)}\n\n问题：${question}`
             : `（知识库未检索到相关资料）\n\n问题：${question}`
         const messages: ChatMessage[] = [...history, { role: 'user', content: userTurn }]
-        // 动态 system：稳定模板 + 确定性 facts（RAG 路径恒为 knowledge 作用域）。
-        const system = assembleSystemPrompt(RAG_GENERATION_TEMPLATE, { scope: 'knowledge' })
+        // RAG 单轮锁定单库、资料随轮注入，无动态作用域片段 → 直接用稳定模板（与 agent scope 解耦）。
+        const system = RAG_GENERATION_TEMPLATE
         // 发送即快照（§14.5）：把本轮实际发给模型的 system 落 internal 条目——审计忠实、抗版本漂移，
         // 不靠事后重算（assembler/模板是会迭代的代码，重算会漂移）。RAG 单轮无 run，run_id 为 null。
         await models.contextItems.insert({

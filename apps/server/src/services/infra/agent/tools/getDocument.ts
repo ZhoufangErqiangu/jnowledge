@@ -2,6 +2,7 @@ import { z } from 'zod'
 import type { Models } from '../../../../models/index.js'
 import type { CollectionService } from '../../../domain/collection.service.js'
 import type { Tool, ToolResult } from '../types.js'
+import { inCeiling } from '../scope.js'
 
 const paramsSchema = z.object({
   documentId: z.string().describe('文档 id（通常来自 knowledge_search 命中的引用）'),
@@ -9,8 +10,8 @@ const paramsSchema = z.object({
 
 /**
  * primitive 工具示例：按 id 取文档标题与正文摘要。
- * 作用域：知识库会话只能读 ctx.collectionId 下的文档；
- * 全局会话不绑库，改按 ctx.principal 校验该文档所属库的 viewer 权限（最小权限）。
+ * 作用域：文档所属库须在本 run 的天花板内（inCeiling；越界当作不可见，不泄露存在），
+ * 再按 ctx.principal 校验该库的 viewer 权限（最小权限）。
  */
 export function createGetDocumentTool(models: Models, collectionService: CollectionService): Tool {
   return {
@@ -28,16 +29,13 @@ export function createGetDocumentTool(models: Models, collectionService: Collect
         error: 'not found',
       }
       if (!doc) return notFound
-      if (ctx.collectionId) {
-        // 知识库会话：限定本库。
-        if (doc.collection_id !== ctx.collectionId) return notFound
-      } else {
-        // 全局会话：按用户权限放行其可访问库内的文档。
-        try {
-          await collectionService.assertRole(ctx.principal, doc.collection_id, 'viewer')
-        } catch {
-          return notFound
-        }
+      // 作用域天花板：库不在范围内当作不可见（数组天花板时生效；principal 恒过）。
+      if (!inCeiling(ctx.scope, doc.collection_id)) return notFound
+      // 实权边界：按 principal 校验该库 viewer 权限。
+      try {
+        await collectionService.assertRole(ctx.principal, doc.collection_id, 'viewer')
+      } catch {
+        return notFound
       }
       const version = doc.current_version_id
         ? await models.documentVersions.findById(doc.current_version_id)

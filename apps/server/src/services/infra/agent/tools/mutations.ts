@@ -8,6 +8,7 @@ import type { DocumentRepo } from '../../../../models/document.repo.js'
 import type { PendingOperationRepo } from '../../../../models/pendingOperation.repo.js'
 import type { AuditVerdict, OperationAuditor } from '../operationAuditor.js'
 import type { RunContext, Tool, ToolResult } from '../types.js'
+import { inCeiling } from '../scope.js'
 
 export interface MutationToolDeps {
   documentService: DocumentService
@@ -80,11 +81,10 @@ export function createMutationTools(deps: MutationToolDeps): Tool[] {
     }
   }
 
-  /** 解析写操作的目标库：显式参数优先，否则用会话绑定库；都没有则报错。 */
-  function resolveCollection(explicit: unknown, ctx: RunContext): string {
-    const target = (typeof explicit === 'string' && explicit) || ctx.collectionId
-    if (!target) throw new Error('未指定知识库：全局会话需显式提供 collectionId')
-    return target
+  /** 解析写操作的目标库：须显式提供 collectionId（顶层 agent 不绑库，无默认）。 */
+  function resolveCollection(explicit: unknown): string {
+    if (typeof explicit === 'string' && explicit) return explicit
+    throw new Error('未指定知识库：请提供 collectionId（可先用 list_collections 获取）')
   }
 
   const specs: MutationSpec[] = [
@@ -92,15 +92,14 @@ export function createMutationTools(deps: MutationToolDeps): Tool[] {
       name: 'create_document',
       description: '在知识库中新建一篇文档（manual 来源，正文为 Markdown）。',
       paramsSchema: z.object({
-        collectionId: z.string().optional().describe('目标知识库 id；库内会话可省略（默认当前库）'),
+        collectionId: z.string().describe('目标知识库 id（必填，可先用 list_collections 获取）'),
         title: z.string().min(1).describe('文档标题'),
         content: z.string().min(1).describe('文档正文（Markdown）'),
         ...confirmTokenField,
       }),
-      describe: (a, ctx) =>
-        `在知识库 ${resolveCollection(a.collectionId, ctx)} 新建文档《${a.title}》`,
+      describe: (a) => `在知识库 ${resolveCollection(a.collectionId)} 新建文档《${a.title}》`,
       run: async (a, ctx) => {
-        const collectionId = resolveCollection(a.collectionId, ctx)
+        const collectionId = resolveCollection(a.collectionId)
         const doc = await documentService.createManual(ctx.principal, {
           collectionId,
           title: a.title as string,
@@ -226,11 +225,10 @@ export function createMutationTools(deps: MutationToolDeps): Tool[] {
   async function gatherFacts(
     spec: MutationSpec,
     args: Record<string, unknown>,
-    ctx: RunContext,
   ): Promise<Record<string, unknown>> {
     try {
       if (spec.name === 'delete_collection' || spec.name === 'rename_collection') {
-        const cid = typeof args.collectionId === 'string' ? args.collectionId : ctx.collectionId
+        const cid = typeof args.collectionId === 'string' ? args.collectionId : undefined
         if (!cid) return {}
         const [childCollections, docCount, col] = await Promise.all([
           collections.countChildren(cid),
@@ -260,6 +258,37 @@ export function createMutationTools(deps: MutationToolDeps): Tool[] {
     } catch {
       return {}
     }
+  }
+
+  /** 本次写操作触达的知识库 id 集（move 含源库与目标库）——供作用域天花板校验。 */
+  async function targetCollections(
+    spec: MutationSpec,
+    args: Record<string, unknown>,
+  ): Promise<string[]> {
+    const out: string[] = []
+    const push = (v: unknown) => {
+      if (typeof v === 'string' && v) out.push(v)
+    }
+    if (
+      spec.name === 'create_document' ||
+      spec.name === 'rename_collection' ||
+      spec.name === 'delete_collection'
+    )
+      push(args.collectionId)
+    if (spec.name === 'create_collection') push(args.parentId)
+    if (spec.name === 'move_document') push(args.targetCollectionId)
+    if (
+      spec.name === 'update_document' ||
+      spec.name === 'delete_document' ||
+      spec.name === 'move_document'
+    ) {
+      const did = typeof args.documentId === 'string' ? args.documentId : undefined
+      if (did) {
+        const doc = await documents.findById(did)
+        if (doc) push(doc.collection_id)
+      }
+    }
+    return out
   }
 
   /**
@@ -414,8 +443,19 @@ export function createMutationTools(deps: MutationToolDeps): Tool[] {
     const token = typeof args.confirmToken === 'string' ? args.confirmToken : undefined
     if (token) return confirmAndExecute(spec, token, ctx)
 
+    // 作用域天花板（确定性硬边界，仅数组收窄时校验；顶层 principal 恒过、零成本）。
+    if (ctx.scope.ceiling !== 'principal') {
+      const targets = await targetCollections(spec, args)
+      const outside = targets.find((c) => !inCeiling(ctx.scope, c))
+      if (outside) {
+        const reason = `目标知识库 ${outside} 超出当前委派作用域，无法操作。`
+        await recordVerdict(spec, description, { decision: 'reject', reason }, 'deterministic', ctx)
+        return rejectResult(description, reason)
+      }
+    }
+
     // 首次提案：采集确定性事实 → 硬规则（抗注入）→ LLM 审计 → 分流。
-    const facts = await gatherFacts(spec, args, ctx)
+    const facts = await gatherFacts(spec, args)
     const hard = hardReject(spec, facts)
     if (hard) {
       await recordVerdict(spec, description, { decision: 'reject', reason: hard }, 'deterministic', ctx, {

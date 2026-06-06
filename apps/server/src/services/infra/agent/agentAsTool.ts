@@ -5,6 +5,7 @@ import type { ContextItemRepo } from '../../../models/contextItem.repo.js'
 import type { AgentTurnMessage } from '../llm/types.js'
 import { runAgent } from './runtime.js'
 import { createRunRecorder } from './runRecorder.js'
+import { narrow } from './scope.js'
 import {
   type AgentDef,
   type RunContext,
@@ -15,6 +16,12 @@ import {
 
 const paramsSchema = z.object({
   task: z.string().min(1).describe('交给子 agent 完成的子任务描述（自包含、明确）'),
+  scope: z
+    .array(z.string())
+    .optional()
+    .describe(
+      '委派给子 agent 的知识库 id 集合：子 agent 只能在此范围内活动（仅能收窄到你自己可触达的库，超出的会被丢弃）；省略则继承你当前的作用域',
+    ),
 })
 
 /** agentAsTool 的落库依赖（与 createMutationTools 同构，由组合根/agent.service 接线）。 */
@@ -50,7 +57,7 @@ export function agentAsTool(def: AgentDef, deps: AgentAsToolDeps): Tool {
           error: 'max agent depth',
         }
       }
-      const { task } = args as z.infer<typeof paramsSchema>
+      const { task, scope: requestedScope } = args as z.infer<typeof paramsSchema>
       // 子 run：独立 runId + 记 parent_run_id（接入 run 树）；不复用父 runId。
       const childRunId = uuidv7()
       await agentRuns.insert({
@@ -60,7 +67,13 @@ export function agentAsTool(def: AgentDef, deps: AgentAsToolDeps): Tool {
         agentName: def.name,
         input: task,
       })
-      const childCtx: RunContext = { ...ctx, runId: childRunId, depth: ctx.depth + 1 }
+      // 委派边界：子作用域 = 父 ∩ 请求，只能收窄（不信 LLM 的 scope 参数——交集挡住任何加宽）。
+      const childCtx: RunContext = {
+        ...ctx,
+        runId: childRunId,
+        depth: ctx.depth + 1,
+        scope: narrow(ctx.scope, requestedScope),
+      }
       // 子 run 全过程按第三状态（internal）落库：留痕但不进 LLM/用户视图。
       const recorder = createRunRecorder(contextItems, {
         conversationId: ctx.conversationId,

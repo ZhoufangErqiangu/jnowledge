@@ -46,13 +46,20 @@ export interface AgentDef {
   maxSteps?: number
 }
 
+/** 作用域天花板：沿 run 树委派、单调收窄。'principal'=principal 全量可访问库；string[]=收窄到指定库集。 */
+export interface Scope {
+  ceiling: 'principal' | string[]
+}
+
 /** 一次 run 的上下文（含熔断预算与可变引用聚合器）。 */
 export interface RunContext {
   /**
-   * 绑定的知识库：知识库会话固定本库；全局会话为 undefined，
-   * 工具需让模型显式选库（list_collections → knowledge_search(collectionId)）。
+   * 本 run 的作用域天花板（run 的属性，非 agent 身份；沿 run 树委派、单调收窄）：
+   * - 'principal'：可触达 ctx.principal 有权访问的全部库（顶层 agent 恒为此，实权由 assertRole 守）；
+   * - string[]：被收窄到指定库集（仅经 agentAsTool 委派产生，子 agent 不可加宽）。
+   * 工具按此校验目标库是否越界（见 scope.ts / inCeiling）；越界须显式回报，不得绕过。
    */
-  collectionId?: string
+  scope: Scope
   /** 请求者身份；全局态工具按其权限校验所选库的访问（结构化，避免 infra 反依赖 domain）。 */
   principal: { uid: string; role: 'admin' | 'user' }
   /** 当前会话 id；写操作两阶段确认据此定位 pending。 */
