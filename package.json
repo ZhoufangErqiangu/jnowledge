@@ -8,6 +8,7 @@
   },
   "packageManager": "pnpm@9.15.9",
   "scripts": {
+    "dev": "pnpm --parallel --filter @jnowledge/server --filter @jnowledge/web dev",
     "dev:server": "pnpm --filter @jnowledge/server dev",
     "dev:web": "pnpm --filter @jnowledge/web dev",
     "build": "pnpm -r build",
