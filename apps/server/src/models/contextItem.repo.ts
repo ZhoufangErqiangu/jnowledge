@@ -27,6 +27,14 @@ export interface ContextItemMeta {
   /** assistant 轮的思考过程（thinking 开时）。不入 LLM/用户内容投影，仅展示/审计。 */
   reasoning?: string
   /**
+   * 本条 assistant 对应的那次 LLM 调用的耗时与 token 用量（诊断/成本归因，调试上下文展示）。
+   * 与 infra 的 LlmCallStat 同形、内联以免 models 反依赖 infra；usage 在供应商不回报时缺省。
+   */
+  llm?: {
+    durationMs: number
+    usage?: { promptTokens: number; completionTokens: number; totalTokens: number }
+  }
+  /**
    * 子推理 / 快照类别（仅 internal 状态条目用）：标注这条留痕来自哪个 stage——
    * safety=写操作安全判级；rag_filter=RAG 抽取式相关性过滤决策；
    * system=实际发送给模型的 system prompt 快照（§14.5：不重算重建，发送即快照，抗版本漂移）。

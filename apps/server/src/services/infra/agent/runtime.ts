@@ -1,5 +1,11 @@
-import type { AgentTurnMessage, ToolCall } from '../llm/types.js'
-import { type AgentDef, type AgentEvent, type RunContext, DEFAULT_MAX_STEPS } from './types.js'
+import type { AgentTurnMessage, LlmUsage, ToolCall } from '../llm/types.js'
+import {
+  type AgentDef,
+  type AgentEvent,
+  type LlmCallStat,
+  type RunContext,
+  DEFAULT_MAX_STEPS,
+} from './types.js'
 
 /**
  * 通用 Agent Runtime：标准 ReAct / tool-calling 循环。
@@ -35,6 +41,9 @@ export async function* runAgent(
 
     let answer = ''
     let toolCalls: ToolCall[] | undefined
+    let usage: LlmUsage | undefined
+    // 本次 LLM 调用 wall-clock 耗时：建连到流耗尽（首 token 延迟 + 生成时长），归到该轮 assistant。
+    const startedAt = Date.now()
     for await (const chunk of ctx.llm.chat.tier(def.tier).generateStream({ messages, tools })) {
       if (ctx.signal.aborted) return
       if (chunk.type === 'reasoning') {
@@ -44,14 +53,17 @@ export async function* runAgent(
         answer += chunk.delta
         approxChars += chunk.delta.length
         yield { type: 'text', delta: chunk.delta }
+      } else if (chunk.type === 'usage') {
+        usage = chunk.usage
       } else {
         toolCalls = chunk.calls
       }
     }
+    const llm: LlmCallStat = { durationMs: Date.now() - startedAt, ...(usage ? { usage } : {}) }
 
     // 没有工具调用 → 最终答复。
     if (!toolCalls || toolCalls.length === 0) {
-      yield { type: 'final', answer }
+      yield { type: 'final', answer, llm }
       return
     }
 
@@ -60,7 +72,7 @@ export async function* runAgent(
       answer ? { role: 'assistant', content: answer, toolCalls } : { role: 'assistant', toolCalls },
     )
     // emit 在 step_start 之前 → service 落库顺序 = (assistant, ...tool_result)，与逻辑序一致。
-    yield { type: 'assistant', ...(answer ? { content: answer } : {}), toolCalls }
+    yield { type: 'assistant', ...(answer ? { content: answer } : {}), toolCalls, llm }
 
     for (const call of toolCalls) {
       seq++

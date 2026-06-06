@@ -5,6 +5,7 @@ import type {
   ChatMessage,
   GenerateOptions,
   LLMCapability,
+  LlmUsage,
   ObjectOptions,
   StreamChunk,
   TextOptions,
@@ -148,6 +149,8 @@ export abstract class OpenAIChatProvider implements LLMCapability {
       })),
       tool_choice: 'auto',
       stream: true,
+      // 流末附带 token 用量（OpenAI 形状：最后一个 choices=[] 的 chunk 带 usage）。供应商不支持则静默无此 chunk。
+      stream_options: { include_usage: true },
       ...this.thinkingBody(opts),
       ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
       ...(opts.maxTokens !== undefined ? { max_tokens: opts.maxTokens } : {}),
@@ -229,6 +232,8 @@ async function* parseToolStream(body: ReadableStream<Uint8Array>): AsyncIterable
   let buffer = ''
   // 按 tool_calls[].index 累积分片。
   const acc = new Map<number, { id: string; name: string; args: string }>()
+  // 流末 usage（include_usage 开时由最后一个 choices=[] 的 chunk 携带；供应商不支持则保持 undefined）。
+  let usage: LlmUsage | undefined
   for (;;) {
     const { done, value } = await reader.read()
     if (done) break
@@ -249,7 +254,9 @@ async function* parseToolStream(body: ReadableStream<Uint8Array>): AsyncIterable
               tool_calls?: { index?: number; id?: string; function?: { name?: string; arguments?: string } }[]
             }
           }[]
+          usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }
         }
+        if (json.usage) usage = toLlmUsage(json.usage)
         const delta = json.choices?.[0]?.delta
         if (delta?.reasoning_content) yield { type: 'reasoning', delta: delta.reasoning_content }
         if (delta?.content) yield { type: 'text', delta: delta.content }
@@ -276,6 +283,22 @@ async function* parseToolStream(body: ReadableStream<Uint8Array>): AsyncIterable
         return { id: c.id, name: c.name, arguments: parsed.ok ? parsed.value : {} }
       })
     yield { type: 'tool_calls', calls }
+  }
+  if (usage) yield { type: 'usage', usage }
+}
+
+/** OpenAI 形状 usage（snake_case，字段可缺）→ 归一化 LlmUsage；缺失计 0，total 缺则由分项相加。 */
+function toLlmUsage(u: {
+  prompt_tokens?: number
+  completion_tokens?: number
+  total_tokens?: number
+}): LlmUsage {
+  const promptTokens = u.prompt_tokens ?? 0
+  const completionTokens = u.completion_tokens ?? 0
+  return {
+    promptTokens,
+    completionTokens,
+    totalTokens: u.total_tokens ?? promptTokens + completionTokens,
   }
 }
 

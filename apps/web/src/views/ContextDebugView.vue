@@ -72,6 +72,25 @@ function hasMeta(meta: Record<string, unknown>): boolean {
   return Object.keys(meta).length > 0
 }
 
+/** 一条 assistant 对应那次 LLM 调用的耗时 + token 用量（meta.llm，由 runtime 实测落库）。 */
+interface LlmStat {
+  durationMs: number
+  usage?: { promptTokens: number; completionTokens: number; totalTokens: number }
+}
+function llmStat(it: ContextItemDebug): LlmStat | null {
+  const llm = it.meta.llm as LlmStat | undefined
+  return llm && typeof llm.durationMs === 'number' ? llm : null
+}
+
+/** 耗时人读化：≥1s 显示秒（一位小数），否则毫秒。 */
+function fmtDuration(ms: number): string {
+  return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`
+}
+
+function fmtTokens(n: number): string {
+  return n.toLocaleString()
+}
+
 // 非主线推理（internal 状态条目）：裁决 / 过滤 / system 快照 / 子 agent——留痕但不进任一视图。
 const STAGE_LABEL: Record<string, string> = {
   safety: '安全裁决',
@@ -136,6 +155,20 @@ function back() {
               <el-tag v-if="agentNameOf(it.runId)" size="small" effect="plain" type="info">
                 {{ agentNameOf(it.runId) }}
               </el-tag>
+              <span v-if="llmStat(it)" class="llm-stat">
+                <span class="llm-pill" title="本轮 LLM 推理 wall-clock 耗时">
+                  ⏱ {{ fmtDuration(llmStat(it)!.durationMs) }}
+                </span>
+                <span
+                  v-if="llmStat(it)!.usage"
+                  class="llm-pill"
+                  title="token 用量：输入(prompt) / 输出(completion) / 合计"
+                >
+                  🔢 {{ fmtTokens(llmStat(it)!.usage!.totalTokens) }} tok
+                  (↑{{ fmtTokens(llmStat(it)!.usage!.promptTokens) }}
+                  ↓{{ fmtTokens(llmStat(it)!.usage!.completionTokens) }})
+                </span>
+              </span>
               <span class="ts">{{ new Date(it.createdAt).toLocaleString() }}</span>
             </div>
 
@@ -298,6 +331,19 @@ function back() {
   margin-left: auto;
   font-size: 12px;
   color: var(--el-text-color-secondary);
+}
+.llm-stat {
+  display: inline-flex;
+  gap: 6px;
+}
+.llm-pill {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--el-text-color-secondary);
+  background: var(--el-fill-color-light);
+  border-radius: 4px;
+  padding: 1px 6px;
+  white-space: nowrap;
 }
 .content {
   margin: 0;

@@ -5,7 +5,7 @@ import type {
   ContextItemRepo,
   ContextItemRow,
 } from '../../../models/contextItem.repo.js'
-import type { AgentEvent } from './types.js'
+import type { AgentEvent, LlmCallStat } from './types.js'
 
 /**
  * RunRecorder：把一次 run 产生的 AgentEvent 落成 context_items 的「写侧」收口。
@@ -39,11 +39,12 @@ export function createRunRecorder(contextItems: ContextItemRepo, base: RunRecord
       inputBySeq.set(seq, input)
     },
 
-    /** 中间 assistant 轮（发起了工具调用）：toolCalls + 本轮思考进 meta 供诊断/v2 重建。 */
+    /** 中间 assistant 轮（发起了工具调用）：toolCalls + 本轮思考 + 本次 LLM 调用耗时/用量进 meta。 */
     async assistant(ev: Extract<AgentEvent, { type: 'assistant' }>): Promise<void> {
       const meta: ContextItemMeta = {
         ...(ev.toolCalls ? { toolCalls: ev.toolCalls } : {}),
         ...(pendingReasoning ? { reasoning: pendingReasoning } : {}),
+        ...(ev.llm ? { llm: ev.llm } : {}),
       }
       await contextItems.insert({
         id: uuidv7(),
@@ -79,8 +80,16 @@ export function createRunRecorder(contextItems: ContextItemRepo, base: RunRecord
       })
     },
 
-    /** 终答 assistant 条目（带引用 + 末轮思考）；返回落库行供回填 run。 */
-    async finalAssistant(content: string, citations: Citation[]): Promise<ContextItemRow> {
+    /** 终答 assistant 条目（带引用 + 末轮思考 + 产出该终答那次 LLM 调用的耗时/用量）；返回落库行供回填 run。 */
+    async finalAssistant(
+      content: string,
+      citations: Citation[],
+      llm?: LlmCallStat,
+    ): Promise<ContextItemRow> {
+      const meta: ContextItemMeta = {
+        ...(pendingReasoning ? { reasoning: pendingReasoning } : {}),
+        ...(llm ? { llm } : {}),
+      }
       const row = await contextItems.insert({
         id: uuidv7(),
         conversationId,
@@ -89,7 +98,7 @@ export function createRunRecorder(contextItems: ContextItemRepo, base: RunRecord
         content,
         citations,
         flags: { state },
-        ...(pendingReasoning ? { meta: { reasoning: pendingReasoning } } : {}),
+        ...(Object.keys(meta).length ? { meta } : {}),
       })
       pendingReasoning = ''
       return row

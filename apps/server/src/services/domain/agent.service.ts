@@ -3,6 +3,7 @@ import { ERROR_CODES, type AgentStreamEvent, type Citation } from '@jnowledge/sh
 import type { Models } from '../../models/index.js'
 import {
   type AgentDef,
+  type LlmCallStat,
   type RunContext,
   assembleSystemPrompt,
   createGetDocumentTool,
@@ -237,6 +238,8 @@ export function createAgentService(deps: AgentDeps): AgentService {
       })
 
       let answer = ''
+      // 产出终答那次 LLM 调用的耗时/用量（final 事件携带），落到终答 assistant 条目 meta.llm。
+      let finalLlm: LlmCallStat | undefined
       for await (const ev of runAgent(agentDef, initialMessages, ctx)) {
         switch (ev.type) {
           case 'assistant':
@@ -261,6 +264,7 @@ export function createAgentService(deps: AgentDeps): AgentService {
             break
           case 'final':
             answer = ev.answer || answer
+            finalLlm = ev.llm
             break
           case 'error':
             await models.agentRuns.fail(runId, ev.message)
@@ -272,7 +276,7 @@ export function createAgentService(deps: AgentDeps): AgentService {
       // 引用校验 + 落库终答 assistant 条目 + 完成 run。
       const finalCitations = validateCitations(answer, citations)
       yield { type: 'citations', citations: finalCitations }
-      const assistant = await recorder.finalAssistant(answer, finalCitations)
+      const assistant = await recorder.finalAssistant(answer, finalCitations, finalLlm)
       await models.agentRuns.complete(runId, assistant.id)
       await models.conversations.touch(conversationId)
       yield { type: 'done', messageId: assistant.id, runId }

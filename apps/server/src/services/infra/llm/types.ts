@@ -104,12 +104,14 @@ export type AgentTurnMessage =
 /**
  * generateStream 的增量分段：
  * - reasoning/text：思考/正文 token；
- * - tool_calls：本轮模型决定调的工具（finish_reason==='tool_calls' 时累积完整后一次性 yield）。
+ * - tool_calls：本轮模型决定调的工具（finish_reason==='tool_calls' 时累积完整后一次性 yield）；
+ * - usage：本次调用的 token 用量（开 stream_options.include_usage 时，流末一次性 yield；供应商不支持则缺省）。
  */
 export type AgentChunk =
   | { type: 'reasoning'; delta: string }
   | { type: 'text'; delta: string }
   | { type: 'tool_calls'; calls: ToolCall[] }
+  | { type: 'usage'; usage: LlmUsage }
 
 export interface GenerateOptions {
   messages: AgentTurnMessage[]
