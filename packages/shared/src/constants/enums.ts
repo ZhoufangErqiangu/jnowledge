@@ -79,10 +79,14 @@ export type ContextItemKind = (typeof CONTEXT_ITEM_KINDS)[number]
 
 /**
  * 上下文条目状态（flag.state）：派生视图据此筛选。
- * active=进入 LLM/用户视图；hidden=保留在全量日志但不进任一视图。
+ * - active：进入 LLM 视图与用户视图（唯一进视图的状态）。
+ * - hidden：留痕于全量日志，但被人工/flag 工具降级、不进任一视图（人类轮的去激活）。
+ * - internal：系统子推理产物（安全判级、RAG 过滤决策、子 agent 全过程），留痕于 raw
+ *   视图但从不进 LLM/用户视图（persisted-but-view-excluded，DESIGN §8.3 第三状态）。
+ *   与 hidden 的区别是来源/语义：internal 从不曾意图进视图，hidden 是曾经的视图条目被降级。
  * summarized/pinned/protected 等高级 flag 留后续期次，本期不写。
  */
-export const CONTEXT_ITEM_STATES = ['active', 'hidden'] as const
+export const CONTEXT_ITEM_STATES = ['active', 'hidden', 'internal'] as const
 export type ContextItemState = (typeof CONTEXT_ITEM_STATES)[number]
 
 // context_items 的 jsonb 载荷形状（meta/flags/toolCall）是纯服务端持久化形状，

@@ -1,28 +1,32 @@
 import { uuidv7 } from 'uuidv7'
 import { ERROR_CODES, type AgentStreamEvent, type Citation } from '@jnowledge/shared'
 import type { Models } from '../../models/index.js'
-import type { ContextItemMeta } from '../../models/contextItem.repo.js'
-import type { Infra } from '../infra/index.js'
-import type { Logger } from '../../logger.js'
 import {
   type AgentDef,
   type RunContext,
+  assembleSystemPrompt,
   createGetDocumentTool,
   createKnowledgeSearchTool,
   createListCollectionsTool,
   createMutationTools,
-  createSafetyClassifier,
+  createOperationAuditor,
+  createRelevanceFilter,
+  createRunRecorder,
   createToolRegistry,
   projectForLlm,
   runAgent,
   toContextItemView,
 } from '../infra/agent/index.js'
+import type { Config } from '../../config/index.js'
+import type { Infra } from '../infra/index.js'
+import type { Logger } from '../../logger.js'
 import type { CollectionService, Principal } from './collection.service.js'
 import type { DocumentService } from './document.service.js'
 import type { RetrievalService, RetrievedChunk } from './retrieval.js'
 import { AppError } from '../../errors.js'
 
 export interface AgentDeps {
+  config: Config
   models: Models
   infra: Infra
   logger: Logger
@@ -52,7 +56,9 @@ const WRITE_GUIDE = [
   '你还可以增删改知识库内容（新建/修改/删除/移动文档，新建/重命名/删除知识库）。使用写工具时：',
   '- 仅在用户明确要求改动时才动手；改动前先想清楚目标对象与范围。',
   '- 若某次写调用返回「需用户确认」，必须把其中的计划与风险如实转述给用户并停下，不要继续执行；',
-  '  待用户在后续消息中明确同意后，再用相同操作并附上返回的 confirmToken 重新调用该工具。严禁自行确认。',
+  '  待用户在后续消息中明确同意后，再按回执指示的工具名与 confirmToken 重新调用执行。严禁自行确认。',
+  '  若回执提示操作已被「审计改写」，必须把改写后的实际操作如实说明给用户，再请其确认。',
+  '- 若某次写调用返回「被拒绝执行」（高危操作），不要尝试绕过或换法重试；如实告知用户该操作需其到管理界面手动完成。',
   '- 若用户未同意或要求取消，则放弃该操作。',
 ]
 
@@ -94,6 +100,12 @@ const GLOBAL_ASSISTANT: AgentDef = {
   maxSteps: 12,
 }
 
+/** agentName → 定义。debug 页据此按 run 的 agent_name 重建该 run 的实际 system prompt（§14.5）。 */
+export const AGENT_DEFS: Record<string, AgentDef> = {
+  [KNOWLEDGE_ASSISTANT.name]: KNOWLEDGE_ASSISTANT,
+  [GLOBAL_ASSISTANT.name]: GLOBAL_ASSISTANT,
+}
+
 /** wall-clock 熔断（ms）。 */
 const RUN_WALL_CLOCK_MS = 120_000
 /** 近似 token 预算（按字符数估算）的字符上限。 */
@@ -102,9 +114,12 @@ const RUN_CHAR_BUDGET = 200_000
 const HISTORY_CHAR_BUDGET = 60_000
 
 export function createAgentService(deps: AgentDeps): AgentService {
-  const { models, infra, logger, collectionService, documentService, retrieval } = deps
+  const { config, models, infra, logger, collectionService, documentService, retrieval } = deps
   const { llm } = infra
-  const classifier = createSafetyClassifier(llm.chat)
+  const auditor = createOperationAuditor(llm.chat)
+  const relevanceFilter = createRelevanceFilter(llm.chat, {
+    skipThreshold: config.rag.filterSkipThreshold,
+  })
 
   async function loadWithAccess(
     p: Principal,
@@ -144,6 +159,12 @@ export function createAgentService(deps: AgentDeps): AgentService {
     }
 
     const runId = uuidv7()
+    // 顶层 run 的落库收口（state=active，进 LLM/用户视图）；与子 run 共用同一套写逻辑。
+    const recorder = createRunRecorder(models.contextItems, {
+      conversationId,
+      runId,
+      state: 'active',
+    })
     try {
       // 全量历史（本轮提问入库前）——投影成 LLM 上下文，并据此判断是否首问。
       const priorItems = (await models.contextItems.listByConversation(conversationId)).map(
@@ -184,14 +205,7 @@ export function createAgentService(deps: AgentDeps): AgentService {
         const citations = chunks.map((c) => toCitation(c, c.marker))
         yield { type: 'token', delta: answer }
         yield { type: 'citations', citations }
-        const msg = await models.contextItems.insert({
-          id: uuidv7(),
-          conversationId,
-          runId,
-          kind: 'assistant',
-          content: answer,
-          citations,
-        })
+        const msg = await recorder.finalAssistant(answer, citations)
         await models.agentRuns.complete(runId, msg.id)
         await models.conversations.touch(conversationId)
         yield { type: 'done', messageId: msg.id, runId }
@@ -200,14 +214,17 @@ export function createAgentService(deps: AgentDeps): AgentService {
 
       // 装配工具注册表（全集；agent 按 toolNames 授予子集）+ run 上下文。
       const registry = createToolRegistry([
-        createKnowledgeSearchTool(retrieval, collectionService),
+        createKnowledgeSearchTool(retrieval, collectionService, relevanceFilter),
         createGetDocumentTool(models, collectionService),
         createListCollectionsTool(collectionService),
         ...createMutationTools({
           documentService,
           collectionService,
-          classifier,
+          auditor,
           pendingOps: models.pendingOperations,
+          contextItems: models.contextItems,
+          collections: models.collections,
+          documents: models.documents,
         }),
       ])
       const citations: Citation[] = []
@@ -227,37 +244,26 @@ export function createAgentService(deps: AgentDeps): AgentService {
         citations,
       }
 
+      // 动态 system：稳定模板（agentDef.system）+ 确定性 facts（会话作用域）。
+      // debug 页用同一 assembler 按 run 的 agent_name 重建（§14.5），故此处与重建必须一致。
+      const system = assembleSystemPrompt(agentDef.system, {
+        scope: cv.collection_id ? 'knowledge' : 'global',
+      })
       // 本轮 user 已落库 → 投影含本轮 user；runtime 不再自拼 [system, user]。
       const initialMessages = projectForLlm([...priorItems, toContextItemView(userItem)], {
-        system: agentDef.system,
+        system,
         budget: HISTORY_CHAR_BUDGET,
       })
 
       let answer = ''
-      // 本轮（当前 LLM 调用）思考过程累积；落到该轮 assistant 的 meta.reasoning 后清空。
-      let turnReasoning = ''
-      const inputBySeq = new Map<number, unknown>()
       for await (const ev of runAgent(agentDef, initialMessages, ctx)) {
         switch (ev.type) {
-          case 'assistant': {
-            // 中间 assistant 轮（发起了工具调用）：全量落库，toolCalls + 本轮思考进 meta 供诊断/v2 重建。
-            const meta: ContextItemMeta = {
-              ...(ev.toolCalls ? { toolCalls: ev.toolCalls } : {}),
-              ...(turnReasoning ? { reasoning: turnReasoning } : {}),
-            }
-            await models.contextItems.insert({
-              id: uuidv7(),
-              conversationId,
-              runId,
-              kind: 'assistant',
-              content: ev.content ?? '',
-              ...(Object.keys(meta).length ? { meta } : {}),
-            })
-            turnReasoning = ''
+          case 'assistant':
+            // 中间 assistant 轮（发起了工具调用）：toolCalls + 本轮思考进 meta 供诊断/v2 重建。
+            await recorder.assistant(ev)
             break
-          }
           case 'reasoning':
-            turnReasoning += ev.delta
+            recorder.addReasoning(ev.delta)
             yield { type: 'reasoning', delta: ev.delta }
             break
           case 'text':
@@ -265,28 +271,11 @@ export function createAgentService(deps: AgentDeps): AgentService {
             yield { type: 'token', delta: ev.delta }
             break
           case 'step_start':
-            inputBySeq.set(ev.seq, ev.input)
+            recorder.noteInput(ev.seq, ev.input)
             yield { type: 'step_start', seq: ev.seq, kind: ev.kind, name: ev.name, input: ev.input }
             break
           case 'tool_result':
-            // content 存 LLM 实际看到的字符串（往返真相源）；结构化 output/入参等进 meta 供诊断。
-            await models.contextItems.insert({
-              id: uuidv7(),
-              conversationId,
-              runId,
-              kind: 'tool_result',
-              content: typeof ev.output === 'string' ? ev.output : JSON.stringify(ev.output ?? null),
-              meta: {
-                seq: ev.seq,
-                name: ev.name,
-                toolCallId: ev.toolCallId,
-                ok: ev.ok,
-                error: ev.error ?? null,
-                summary: ev.summary,
-                input: inputBySeq.get(ev.seq),
-                output: ev.output,
-              },
-            })
+            await recorder.toolResult(ev)
             yield { type: 'tool_result', seq: ev.seq, ok: ev.ok, summary: ev.summary }
             break
           case 'final':
@@ -302,15 +291,7 @@ export function createAgentService(deps: AgentDeps): AgentService {
       // 引用校验 + 落库终答 assistant 条目 + 完成 run。
       const finalCitations = validateCitations(answer, citations)
       yield { type: 'citations', citations: finalCitations }
-      const assistant = await models.contextItems.insert({
-        id: uuidv7(),
-        conversationId,
-        runId,
-        kind: 'assistant',
-        content: answer,
-        citations: finalCitations,
-        ...(turnReasoning ? { meta: { reasoning: turnReasoning } } : {}),
-      })
+      const assistant = await recorder.finalAssistant(answer, finalCitations)
       await models.agentRuns.complete(runId, assistant.id)
       await models.conversations.touch(conversationId)
       yield { type: 'done', messageId: assistant.id, runId }

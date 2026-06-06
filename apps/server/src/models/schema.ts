@@ -137,6 +137,8 @@ export interface ConversationsTable {
 export interface AgentRunsTable {
   id: string
   conversation_id: string
+  // 父 run（嵌套推理：子 agent 作工具时指向发起它的 run）；顶层 run 为 null。run 删除时置 null。
+  parent_run_id: ColumnType<string | null, string | null | undefined, string | null>
   // 终答指针：指向 context_items 里的终答 assistant 条目；run 完成时回填（沿用「不设外键」约定）。
   final_item_id: ColumnType<string | null, string | null | undefined, string | null>
   agent_name: string

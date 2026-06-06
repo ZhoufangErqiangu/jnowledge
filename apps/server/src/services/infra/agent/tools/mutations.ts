@@ -2,15 +2,24 @@ import { z } from 'zod'
 import { uuidv7 } from 'uuidv7'
 import type { CollectionService } from '../../../domain/collection.service.js'
 import type { DocumentService } from '../../../domain/document.service.js'
+import type { CollectionRepo } from '../../../../models/collection.repo.js'
+import type { ContextItemRepo } from '../../../../models/contextItem.repo.js'
+import type { DocumentRepo } from '../../../../models/document.repo.js'
 import type { PendingOperationRepo } from '../../../../models/pendingOperation.repo.js'
-import type { SafetyClassifier } from '../safetyClassifier.js'
+import type { AuditVerdict, OperationAuditor } from '../operationAuditor.js'
 import type { RunContext, Tool, ToolResult } from '../types.js'
 
 export interface MutationToolDeps {
   documentService: DocumentService
   collectionService: CollectionService
-  classifier: SafetyClassifier
+  /** 写操作审计-改写 stage（§14.6）。 */
+  auditor: OperationAuditor
   pendingOps: PendingOperationRepo
+  /** 审计判决落库（第三状态 internal，stage=safety；DESIGN §8.3 / PLAN §14.3）。 */
+  contextItems: ContextItemRepo
+  /** 确定性事实采集（子库/文档数）——硬规则与 deep context 用。 */
+  collections: CollectionRepo
+  documents: DocumentRepo
 }
 
 /** 单个写工具的规格：参数 schema + 描述生成 + 实际执行（执行用「最终生效的参数」，确认路径下为 pending 快照）。 */
@@ -34,7 +43,42 @@ const confirmTokenField = {
 }
 
 export function createMutationTools(deps: MutationToolDeps): Tool[] {
-  const { documentService, collectionService, classifier, pendingOps } = deps
+  const { documentService, collectionService, auditor, pendingOps, contextItems, collections, documents } =
+    deps
+
+  /**
+   * 把审计判决落成 internal 条目：留痕于 raw 视图与 run 树，但不进 LLM/用户视图。
+   * 第三状态首个试金石（PLAN §14.3）——堵住"判级结果产生即丢"的可观测性洞。
+   * source 区分判决来源：deterministic=确定性硬规则（抗注入），auditor=LLM 软判级。
+   */
+  async function recordVerdict(
+    spec: MutationSpec,
+    description: string,
+    verdict: AuditVerdict,
+    source: 'deterministic' | 'auditor',
+    ctx: RunContext,
+    extra?: Record<string, unknown>,
+  ): Promise<void> {
+    try {
+      await contextItems.insert({
+        id: uuidv7(),
+        conversationId: ctx.conversationId,
+        runId: ctx.runId,
+        kind: 'tool_result',
+        content: `操作审计[${source}]：${verdict.decision}｜${verdict.reason}（操作：${description}）`,
+        flags: { state: 'internal' },
+        meta: {
+          stage: 'safety',
+          name: spec.name,
+          input: { toolName: spec.name, description, source, ...extra },
+          verdict,
+          summary: verdict.reason,
+        },
+      })
+    } catch {
+      // 落库失败不应阻断写操作主流程（留痕是旁路）。
+    }
+  }
 
   /** 解析写操作的目标库：显式参数优先，否则用会话绑定库；都没有则报错。 */
   function resolveCollection(explicit: unknown, ctx: RunContext): string {
@@ -167,54 +211,156 @@ export function createMutationTools(deps: MutationToolDeps): Tool[] {
     },
   ]
 
+  const specByName = new Map(specs.map((s) => [s.name, s]))
+
   /** 去掉 confirmToken，得到写进 pending 快照、并在确认时回放的纯操作参数。 */
   function operationArgs(args: Record<string, unknown>): Record<string, unknown> {
     const { confirmToken: _t, ...rest } = args
     return rest
   }
 
-  /** 分类 → 确认门 → 执行。是所有写工具的统一闸口。 */
-  async function gate(spec: MutationSpec, args: Record<string, unknown>, ctx: RunContext) {
-    let description: string
+  /**
+   * deep context：采集确定性事实（廉价 DB 查询：子项数 / 可逆性 / 目标紧凑描述）。
+   * 不读正文全文（避免重新引入"撑爆上下文"）。失败容忍——返回空对象。
+   */
+  async function gatherFacts(
+    spec: MutationSpec,
+    args: Record<string, unknown>,
+    ctx: RunContext,
+  ): Promise<Record<string, unknown>> {
     try {
-      description = spec.describe(args, ctx)
-    } catch (err) {
-      return toolError(spec.name, err)
+      if (spec.name === 'delete_collection' || spec.name === 'rename_collection') {
+        const cid = typeof args.collectionId === 'string' ? args.collectionId : ctx.collectionId
+        if (!cid) return {}
+        const [childCollections, docCount, col] = await Promise.all([
+          collections.countChildren(cid),
+          documents.countByCollection(cid),
+          collections.findById(cid),
+        ])
+        return {
+          collectionId: cid,
+          target: col?.name,
+          childCollections,
+          documents: docCount,
+          reversible: spec.name === 'rename_collection',
+        }
+      }
+      if (
+        spec.name === 'delete_document' ||
+        spec.name === 'update_document' ||
+        spec.name === 'move_document'
+      ) {
+        const did = typeof args.documentId === 'string' ? args.documentId : undefined
+        if (!did) return {}
+        const doc = await documents.findById(did)
+        return { documentId: did, target: doc?.title, exists: !!doc, reversible: true }
+      }
+      // create_*：新建，易回退。
+      return { reversible: true }
+    } catch {
+      return {}
     }
+  }
 
-    const verdict = await classifier.classify({ toolName: spec.name, description })
-
-    // 低风险：直接执行。
-    if (verdict.risk === 'low') {
-      return execute(spec, operationArgs(args), ctx, description)
+  /**
+   * 确定性硬规则（抗注入的安全边界，不经 LLM）：已知灾难性操作直接 reject。
+   * 这是"最硬那道闸"——不交给 LLM 独断（DESIGN §8.5 reject 双来源）。
+   */
+  function hardReject(spec: MutationSpec, facts: Record<string, unknown>): string | null {
+    if (spec.name === 'delete_collection') {
+      const children = Number(facts.childCollections ?? 0)
+      const docs = Number(facts.documents ?? 0)
+      if (children > 0 || docs > 0) {
+        return `知识库非空（${children} 个子库、${docs} 篇文档），不允许一键删除。请先清空，或在管理界面手动逐项删除。`
+      }
     }
+    return null
+  }
 
-    // 高风险：两阶段确认。
-    const token = typeof args.confirmToken === 'string' ? args.confirmToken : undefined
-    if (!token) {
-      const id = uuidv7()
-      await pendingOps.insert({
-        id,
+  /** 有界意图：当前用户轮 ±1（末尾最多 2 条 active user 文本），帮助判官理解用户是否真要这么做。 */
+  async function gatherIntent(ctx: RunContext): Promise<string | undefined> {
+    try {
+      const items = await contextItems.listByConversation(ctx.conversationId)
+      const users = items
+        .filter((i) => i.kind === 'user' && (i.flags?.state ?? 'active') === 'active')
+        .map((i) => i.content)
+      const recent = users.slice(-2)
+      return recent.length ? recent.join(' / ') : undefined
+    } catch {
+      return undefined
+    }
+  }
+
+  /** 原始 → 改写 op 落 internal 留痕（§14.6）。 */
+  async function recordRewrite(
+    spec: MutationSpec,
+    originalArgs: Record<string, unknown>,
+    revised: { toolName: string; args: Record<string, unknown> },
+    ctx: RunContext,
+  ): Promise<void> {
+    try {
+      await contextItems.insert({
+        id: uuidv7(),
         conversationId: ctx.conversationId,
-        proposingRunId: ctx.runId,
-        toolName: spec.name,
-        args: operationArgs(args),
-        description,
-        riskReason: verdict.reason,
+        runId: ctx.runId,
+        kind: 'tool_result',
+        flags: { state: 'internal' },
+        content: `审计改写：${spec.name} → ${revised.toolName}`,
+        meta: {
+          stage: 'safety',
+          name: spec.name,
+          input: { original: { toolName: spec.name, args: originalArgs }, revised },
+          summary: '审计改写操作',
+        },
       })
-      return {
-        ok: true,
-        output: [
-          `⚠️ 该操作需用户确认：${description}`,
-          `风险判定：${verdict.reason}`,
-          '请把以上计划如实转述给用户并停下；待用户在新消息中明确同意后，再用相同操作并附带参数 ' +
-            `confirmToken="${id}" 重新调用本工具执行。未获用户同意不得自行确认。`,
-        ].join('\n'),
-        summary: `需确认：${description}`,
-      } satisfies ToolResult
+    } catch {
+      // 留痕旁路，失败不阻断。
     }
+  }
 
-    // 带 token：校验是否为「上一回合」提出且未消费的合法提案。
+  /** reject 回执：不建 pending、不提供一键确认，要求用户手动操作。 */
+  function rejectResult(description: string, reason: string): ToolResult {
+    return {
+      ok: false,
+      output: [
+        `⛔ 该操作被拒绝执行：${description}`,
+        `原因：${reason}`,
+        '此为高危操作，系统不提供一键确认。请如实告知用户，并建议其到知识库管理界面手动完成（如确有必要）。',
+      ].join('\n'),
+      summary: `已拒绝：${description}`,
+      error: 'rejected',
+    }
+  }
+
+  /** confirm/改写 回执：建 pending，指示模型待用户跨回合确认后调用 toolName + confirmToken。 */
+  function needConfirmResult(
+    id: string,
+    toolName: string,
+    description: string,
+    verdict: AuditVerdict,
+    rewritten: boolean,
+  ): ToolResult {
+    return {
+      ok: true,
+      output: [
+        `⚠️ 该操作需用户确认：${description}`,
+        `判定理由：${verdict.reason}`,
+        rewritten ? `（注意：审计已将操作改写为 ${toolName}，必须如实向用户说明改写内容再请其确认）` : '',
+        `请把以上计划如实转述给用户并停下；待用户在新消息中明确同意后，调用工具 ${toolName} 并附带参数 ` +
+          `confirmToken="${id}" 执行。未获用户同意不得自行确认。`,
+      ]
+        .filter(Boolean)
+        .join('\n'),
+      summary: `需确认：${description}`,
+    }
+  }
+
+  /** 带 token 的确认路径：校验合法提案 + 防同 run 自确认 + 回放快照执行（不二次送审）。 */
+  async function confirmAndExecute(
+    spec: MutationSpec,
+    token: string,
+    ctx: RunContext,
+  ): Promise<ToolResult> {
     const pending = await pendingOps.findById(token)
     if (
       !pending ||
@@ -249,6 +395,80 @@ export function createMutationTools(deps: MutationToolDeps): Tool[] {
     }
     // 回放 pending 快照里的参数（防提案后被篡改），而非本次调用的 args。
     return execute(spec, pending.args, ctx, pending.description)
+  }
+
+  /**
+   * 审计-改写门（§14.6）：是所有写工具的统一闸口。
+   * 确认路径（带 token）直接回放执行、不二次送审；首次提案走
+   * 确定性硬规则（抗注入）→ deep context 喂料 → LLM 审计 → allow/confirm/reject/改写 分流。
+   */
+  async function gate(spec: MutationSpec, args: Record<string, unknown>, ctx: RunContext) {
+    let description: string
+    try {
+      description = spec.describe(args, ctx)
+    } catch (err) {
+      return toolError(spec.name, err)
+    }
+
+    // 确认路径：带 token 不再送审（含改写后的 op），直接校验 + 回放执行。
+    const token = typeof args.confirmToken === 'string' ? args.confirmToken : undefined
+    if (token) return confirmAndExecute(spec, token, ctx)
+
+    // 首次提案：采集确定性事实 → 硬规则（抗注入）→ LLM 审计 → 分流。
+    const facts = await gatherFacts(spec, args, ctx)
+    const hard = hardReject(spec, facts)
+    if (hard) {
+      await recordVerdict(spec, description, { decision: 'reject', reason: hard }, 'deterministic', ctx, {
+        facts,
+      })
+      return rejectResult(description, hard)
+    }
+
+    const intent = await gatherIntent(ctx)
+    const verdict = await auditor.audit({ toolName: spec.name, description, facts, intent })
+    await recordVerdict(spec, description, verdict, 'auditor', ctx, { facts })
+
+    if (verdict.decision === 'reject') return rejectResult(description, verdict.reason)
+
+    // 改写校验：revised 须指向已知工具且参数合法，否则丢弃改写、按原 op 处理（安全兜底）。
+    let finalSpec = spec
+    let finalArgs = operationArgs(args)
+    let rewritten = false
+    if (verdict.revised) {
+      const target = specByName.get(verdict.revised.toolName)
+      const parsed = target?.paramsSchema.safeParse(verdict.revised.args)
+      if (target && parsed?.success) {
+        finalSpec = target
+        finalArgs = operationArgs(verdict.revised.args)
+        rewritten = true
+        await recordRewrite(spec, operationArgs(args), verdict.revised, ctx)
+      }
+    }
+
+    // allow 且未改写 → 直接执行；confirm 或 改写 → 两阶段确认（改写不二次送审）。
+    if (verdict.decision === 'allow' && !rewritten) {
+      return execute(finalSpec, finalArgs, ctx, description)
+    }
+
+    let finalDescription = description
+    if (rewritten) {
+      try {
+        finalDescription = finalSpec.describe(finalArgs, ctx)
+      } catch {
+        finalDescription = `${finalSpec.name}（审计改写）`
+      }
+    }
+    const id = uuidv7()
+    await pendingOps.insert({
+      id,
+      conversationId: ctx.conversationId,
+      proposingRunId: ctx.runId,
+      toolName: finalSpec.name,
+      args: finalArgs,
+      description: finalDescription,
+      riskReason: verdict.reason,
+    })
+    return needConfirmResult(id, finalSpec.name, finalDescription, verdict, rewritten)
   }
 
   async function execute(

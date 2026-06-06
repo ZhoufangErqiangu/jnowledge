@@ -12,13 +12,23 @@ import type { Models } from '../../models/index.js'
 import type { Infra } from '../infra/index.js'
 import type { Logger } from '../../logger.js'
 import type { ChatMessage } from '../infra/llm/types.js'
-import { projectForChat, projectForUser, toContextItemView } from '../infra/agent/index.js'
+import {
+  RAG_GENERATION_TEMPLATE,
+  assembleSystemPrompt,
+  createRelevanceFilter,
+  projectForChat,
+  projectForUser,
+  toContextItemView,
+} from '../infra/agent/index.js'
+import { AGENT_DEFS } from './agent.service.js'
 import { toConversation } from '../../models/mappers.js'
+import type { Config } from '../../config/index.js'
 import type { CollectionService, Principal } from './collection.service.js'
 import type { RetrievalService, RetrievedChunk } from './retrieval.js'
 import { AppError } from '../../errors.js'
 
 export interface ChatDeps {
+  config: Config
   models: Models
   infra: Infra
   logger: Logger
@@ -42,15 +52,13 @@ export interface ChatService {
 /** 跨轮历史投影进 LLM 上下文的字符预算。 */
 const HISTORY_CHAR_BUDGET = 60_000
 
-const GENERATION_SYSTEM = [
-  '你是知识库问答助手。只能依据下面提供的「资料」回答用户问题，不得编造资料外的信息。',
-  '每条资料以 [序号] 开头。回答时，凡是引用了某条资料的句子，必须在句末用对应的 [序号] 标注来源（可多个，如 [1][3]）。',
-  '若资料不足以回答，明确说明「根据现有资料无法回答」，不要臆测。用简洁的中文回答。',
-].join('\n')
-
 export function createChatService(deps: ChatDeps): ChatService {
-  const { models, infra, logger, collectionService, retrieval } = deps
+  const { config, models, infra, logger, collectionService, retrieval } = deps
   const { llm } = infra
+  // RAG 抽取式相关性过滤（§14.4）：reranker 之后的语义守门员。
+  const relevanceFilter = createRelevanceFilter(llm.chat, {
+    skipThreshold: config.rag.filterSkipThreshold,
+  })
 
   async function loadWithAccess(
     p: Principal,
@@ -140,7 +148,27 @@ export function createChatService(deps: ChatDeps): ChatService {
 
       // 检索：改写 → 完整混合检索。
       const rewritten = await retrieval.rewriteQuery(question, history)
-      const chunks = await retrieval.retrieve(collectionId, rewritten)
+      const hits = await retrieval.retrieve(collectionId, rewritten)
+
+      // 抽取式相关性过滤（§14.4）：reranker 之后的语义守门员，保留/丢弃整段不改写。
+      // kept = 模型本轮实际所见；过滤决策另落 internal 条目留痕（不进任一视图）。
+      const { kept: chunks, dropped, applied } = await relevanceFilter.filter(rewritten, hits)
+      if (applied) {
+        await models.contextItems.insert({
+          id: uuidv7(),
+          conversationId,
+          kind: 'tool_result',
+          flags: { state: 'internal' },
+          content: `RAG 相关性过滤：命中 ${hits.length} 段 → 保留 ${chunks.length}、丢弃 ${dropped.length}`,
+          meta: {
+            stage: 'rag_filter',
+            name: 'relevance_filter',
+            summary: `保留 ${chunks.length}/${hits.length}`,
+            input: { query: rewritten, totalHits: hits.length },
+            verdict: { keptMarkers: chunks.map((c) => c.marker), dropped },
+          },
+        })
+      }
 
       // 检索结果写回上下文（tool_result）——使原始上下文自包含：改写后的查询与命中片段
       // 都留痕于全量日志（与 agent 路径的工具结果同构）。投影引擎跨轮不回放 tool_result，
@@ -149,7 +177,7 @@ export function createChatService(deps: ChatDeps): ChatService {
         id: uuidv7(),
         conversationId,
         kind: 'tool_result',
-        // content 存 LLM 本轮实际看到的「资料」块（往返真相源）；结构化 chunks 进 meta.output。
+        // content 存 LLM 本轮实际看到的「资料」块（过滤后=往返真相源）；结构化进 meta.output。
         content: chunks.length > 0 ? buildContextBlocks(chunks) : '（未检索到相关资料）',
         meta: {
           seq: 1,
@@ -179,8 +207,10 @@ export function createChatService(deps: ChatDeps): ChatService {
             ? `资料：\n${buildContextBlocks(chunks)}\n\n问题：${question}`
             : `（知识库未检索到相关资料）\n\n问题：${question}`
         const messages: ChatMessage[] = [...history, { role: 'user', content: userTurn }]
+        // 动态 system：稳定模板 + 确定性 facts（RAG 路径恒为 knowledge 作用域）。
+        const system = assembleSystemPrompt(RAG_GENERATION_TEMPLATE, { scope: 'knowledge' })
         for await (const part of llm.chat.tier('standard').textStream({
-          system: GENERATION_SYSTEM,
+          system,
           messages,
         })) {
           if (part.type === 'reasoning') {
@@ -249,16 +279,45 @@ export function createChatService(deps: ChatDeps): ChatService {
     },
 
     async getContextDebug(p, conversationId) {
-      // TODO(可观测性): system prompt 目前是请求时注入的静态常量（GENERATION_SYSTEM /
-      // agentDef.system），不入 context_items，故 raw/llmView 都看不到它。待推理流程定型后
-      // （system 将动态派生、并可能存在多层嵌套推理）再统一处理 system 与嵌套链路的可观测性，
-      // 届时需先回答「system 算原始上下文还是派生逻辑」。暂缓，避免给移动靶子绑死建模。
+      // system prompt 不整体入库：是 (静态模板 + 已落库事实) 的纯函数（DESIGN §8.2）。
+      // 下方 systemView 跑同一 assembler 忠实重建各路径/各 run 的实际 system —— 解原 TODO。
       const cv = await loadWithAccess(p, conversationId, 'viewer')
       // 原始上下文：context_items 全量、全序、未过滤（含 meta/flags）。
       const rows = await models.contextItems.listByConversation(conversationId)
       const views = rows.map(toContextItemView)
+      // run 树：本会话全部 run（含 parentRunId），前端据此把 raw 按 run 分组、表达父子。
+      const runs = (await models.agentRuns.listByConversation(conversationId)).map((r) => ({
+        id: r.id,
+        parentRunId: r.parent_run_id,
+        agentName: r.agent_name,
+        status: r.status,
+      }))
+      // systemView：按确定性 facts（会话作用域）重建各路径实际 system prompt。
+      const scope = cv.collection_id ? ('knowledge' as const) : ('global' as const)
+      const systemView: { runId: string | null; label: string; content: string }[] = []
+      // RAG 单轮路径（run_id 为 null，仅知识库会话）。
+      if (cv.collection_id) {
+        systemView.push({
+          runId: null,
+          label: 'RAG 生成 (chat)',
+          content: assembleSystemPrompt(RAG_GENERATION_TEMPLATE, { scope: 'knowledge' }),
+        })
+      }
+      // 每个 agent run：按 agentName 选模板重建。
+      for (const r of runs) {
+        const def = AGENT_DEFS[r.agentName]
+        if (def) {
+          systemView.push({
+            runId: r.id,
+            label: r.agentName,
+            content: assembleSystemPrompt(def.system, { scope }),
+          })
+        }
+      }
       return {
         conversation: toConversation(cv),
+        runs,
+        systemView,
         raw: rows.map((r) => ({
           id: r.id,
           conversationId: r.conversation_id,

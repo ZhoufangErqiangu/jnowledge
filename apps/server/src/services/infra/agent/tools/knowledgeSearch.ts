@@ -2,6 +2,7 @@ import { z } from 'zod'
 import type { Citation } from '@jnowledge/shared'
 import type { CollectionService } from '../../../domain/collection.service.js'
 import type { RetrievalService, RetrievedChunk } from '../../../domain/retrieval.js'
+import type { RelevanceFilter } from '../relevanceFilter.js'
 import type { Tool, ToolResult } from '../types.js'
 
 const paramsSchema = z.object({
@@ -25,6 +26,7 @@ const paramsSchema = z.object({
 export function createKnowledgeSearchTool(
   retrieval: RetrievalService,
   collectionService: CollectionService,
+  filter: RelevanceFilter,
 ): Tool {
   return {
     name: 'knowledge_search',
@@ -56,7 +58,9 @@ export function createKnowledgeSearchTool(
           }
         }
       }
-      const chunks = await retrieval.retrieve(target, query)
+      const hits = await retrieval.retrieve(target, query)
+      // 抽取式相关性过滤（§14.4）：agent 见到的也是过滤后结果；marker 在过滤后再分配。
+      const { kept: chunks } = await filter.filter(query, hits)
       if (chunks.length === 0) {
         return {
           ok: true,

@@ -26,6 +26,13 @@ export interface ContextItemMeta {
   toolCalls?: ContextItemToolCall[]
   /** assistant 轮的思考过程（thinking 开时）。不入 LLM/用户内容投影，仅展示/审计。 */
   reasoning?: string
+  /**
+   * 子推理类别（仅 internal 状态条目用）：标注这条留痕来自哪个 stage——
+   * safety=写操作安全判级；rag_filter=RAG 抽取式相关性过滤决策。debug 页据此分类展示。
+   */
+  stage?: 'safety' | 'rag_filter'
+  /** 子推理的结构化判决留痕（如安全判级 verdict、过滤保留/丢弃明细）。 */
+  verdict?: unknown
   seq?: number
   name?: string
   toolCallId?: string

@@ -10,6 +10,7 @@
     "start": "node dist/main.js",
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
+    "test": "NODE_OPTIONS=--conditions=development node --import tsx --test 'src/**/*.test.ts'",
     "migrate": "NODE_OPTIONS=--conditions=development tsx src/db/migrate.ts up",
     "migrate:down": "NODE_OPTIONS=--conditions=development tsx src/db/migrate.ts down",
     "embed:backfill": "NODE_OPTIONS=--conditions=development tsx src/scripts/backfillEmbeddings.ts"

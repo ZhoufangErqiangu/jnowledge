@@ -53,6 +53,7 @@ interface HistoryTurn {
 function historyTurns(items: ContextItemView[]): HistoryTurn[] {
   const turns: HistoryTurn[] = []
   for (const it of items) {
+    // 只有 active 进 LLM 视图；hidden（人工降级）与 internal（系统子推理留痕）一律排除。
     if (it.flags.state !== 'active') continue
     if (it.kind === 'user') {
       turns.push({ role: 'user', content: it.content })
@@ -102,6 +103,7 @@ export function projectForChat(items: ContextItemView[], budget: number): ChatMe
 export function projectForUser(items: ContextItemView[]): Message[] {
   const messages: Message[] = []
   for (const it of items) {
+    // 同 historyTurns：只有 active 进用户视图；hidden / internal 均不可见。
     if (it.flags.state !== 'active') continue
     if (it.kind !== 'user' && it.kind !== 'assistant') continue
     messages.push({

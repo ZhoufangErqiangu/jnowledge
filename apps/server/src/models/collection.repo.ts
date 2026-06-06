@@ -55,6 +55,17 @@ export function createCollectionRepo(db: DB) {
         .execute()
     },
 
+    /** 未删除的直接子知识库数（写操作安全判级的确定性事实）。 */
+    async countChildren(parentId: string): Promise<number> {
+      const { count } = await db
+        .selectFrom('collections')
+        .select((eb) => eb.fn.countAll<number>().as('count'))
+        .where('parent_id', '=', parentId)
+        .where('deleted_at', 'is', null)
+        .executeTakeFirstOrThrow()
+      return Number(count)
+    },
+
     async insert(c: NewCollection): Promise<CollectionRow> {
       return db
         .insertInto('collections')

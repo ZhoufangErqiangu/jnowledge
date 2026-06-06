@@ -7,6 +7,8 @@ export type AgentRunRow = Selectable<AgentRunsTable>
 export interface NewAgentRun {
   id: string
   conversationId: string
+  /** 父 run（嵌套推理）；顶层 run 省略/为 null。 */
+  parentRunId?: string | null
   agentName: string
   input: string
 }
@@ -33,6 +35,7 @@ export function createAgentRunRepo(db: DB) {
         .values({
           id: r.id,
           conversation_id: r.conversationId,
+          parent_run_id: r.parentRunId ?? null,
           agent_name: r.agentName,
           input: r.input,
         })

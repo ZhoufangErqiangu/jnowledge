@@ -1,5 +1,10 @@
 import { z } from 'zod'
-import { CONTEXT_ITEM_KINDS, CONTEXT_ITEM_STATES, MESSAGE_ROLES } from '../constants/enums.js'
+import {
+  AGENT_RUN_STATUSES,
+  CONTEXT_ITEM_KINDS,
+  CONTEXT_ITEM_STATES,
+  MESSAGE_ROLES,
+} from '../constants/enums.js'
 import { isoDateSchema, uuidSchema } from './common.js'
 
 /**
@@ -101,6 +106,29 @@ export const llmViewMessageSchema = z.object({
 export type LlmViewMessage = z.infer<typeof llmViewMessageSchema>
 
 /**
+ * run 树节点：debug 页据 parentRunId 重建「agent → 子 agent」嵌套调用树。
+ * 顶层 run 的 parentRunId 为 null；子 run（agentAsTool）指向发起它的父 run。
+ */
+export const agentRunNodeSchema = z.object({
+  id: uuidSchema,
+  parentRunId: uuidSchema.nullable(),
+  agentName: z.string(),
+  status: z.enum(AGENT_RUN_STATUSES),
+})
+export type AgentRunNode = z.infer<typeof agentRunNodeSchema>
+
+/**
+ * system prompt 重建条目（§14.5 / DESIGN §8.2）：system 不入库，是 (静态模板 + 已落库事实)
+ * 的纯函数，debug 跑同一 assembler 忠实重建。runId 为 null 表示 RAG 单轮路径。
+ */
+export const systemViewEntrySchema = z.object({
+  runId: uuidSchema.nullable(),
+  label: z.string(),
+  content: z.string(),
+})
+export type SystemViewEntry = z.infer<typeof systemViewEntrySchema>
+
+/**
  * 「一源三视图」调试载荷：同一份原始上下文（raw）派生出
  * 推理视图（llmView，喂给 LLM）与用户视图（userView，前端可见聊天）。
  */
@@ -108,7 +136,11 @@ export const contextDebugSchema = z.object({
   conversation: conversationSchema,
   /** 原始上下文：context_items 全量、按 (created_at,id) 全序，未过滤。 */
   raw: z.array(contextItemDebugSchema),
-  /** 推理视图：projectForChat 派生的跨轮历史（system 与当轮检索资料于请求时注入，不在此列）。 */
+  /** run 树：本会话全部 agent_runs（含 parentRunId），前端据此把 raw 按 run 分组并表达父子。 */
+  runs: z.array(agentRunNodeSchema),
+  /** system prompt 重建：按确定性 facts 重算各路径/各 run 的实际 system（不入库，纯函数派生）。 */
+  systemView: z.array(systemViewEntrySchema),
+  /** 推理视图：projectForChat 派生的跨轮历史（当轮检索资料于请求时注入，不在此列）。 */
   llmView: z.array(llmViewMessageSchema),
   /** 用户视图：projectForUser 派生的可见聊天记录。 */
   userView: z.array(messageSchema),

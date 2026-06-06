@@ -63,6 +63,7 @@ export function buildContainer(config: Config): Container {
   const ingestion = createIngestionService({ config, db, models, infra, logger })
   const retrieval = createRetrievalService({ config, models, infra, logger })
   const chat = createChatService({
+    config,
     models,
     infra,
     logger,
@@ -70,6 +71,7 @@ export function buildContainer(config: Config): Container {
     retrieval,
   })
   const agent = createAgentService({
+    config,
     models,
     infra,
     logger,

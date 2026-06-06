@@ -50,6 +50,17 @@ export function createDocumentRepo(db: DB) {
       return { items, total: Number(count) }
     },
 
+    /** 知识库下未删除文档数（写操作安全判级的确定性事实）。 */
+    async countByCollection(collectionId: string): Promise<number> {
+      const { count } = await db
+        .selectFrom('documents')
+        .select((eb) => eb.fn.countAll<number>().as('count'))
+        .where('collection_id', '=', collectionId)
+        .where('deleted_at', 'is', null)
+        .executeTakeFirstOrThrow()
+      return Number(count)
+    },
+
     async insert(d: NewDocument): Promise<DocumentRow> {
       return db
         .insertInto('documents')

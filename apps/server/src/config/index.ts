@@ -106,6 +106,11 @@ const configSchema = z.object({
     rerankTopK: z.coerce.number().int().positive().default(8),
     /** RRF 融合常数（倒数排名 1/(k+rank)）。 */
     rrfK: z.coerce.number().int().positive().default(60),
+    /**
+     * RAG 抽取式相关性过滤（五期 §14.4）：命中数 ≤ 此阈值时跳过过滤（小规模无需，省调用）。
+     * 设 0 表示对任意非空命中都过滤。
+     */
+    filterSkipThreshold: z.coerce.number().int().nonnegative().default(3),
   }),
 })
 
@@ -237,6 +242,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       ftsTopK: env.RAG_FTS_TOPK,
       rerankTopK: env.RAG_RERANK_TOPK,
       rrfK: env.RAG_RRF_K,
+      filterSkipThreshold: env.RAG_FILTER_SKIP_THRESHOLD,
     },
   })
 
