@@ -20,7 +20,6 @@ import {
   projectForUser,
   toContextItemView,
 } from '../infra/agent/index.js'
-import { AGENT_DEFS } from './agent.service.js'
 import { toConversation } from '../../models/mappers.js'
 import type { Config } from '../../config/index.js'
 import type { CollectionService, Principal } from './collection.service.js'
@@ -209,6 +208,16 @@ export function createChatService(deps: ChatDeps): ChatService {
         const messages: ChatMessage[] = [...history, { role: 'user', content: userTurn }]
         // 动态 system：稳定模板 + 确定性 facts（RAG 路径恒为 knowledge 作用域）。
         const system = assembleSystemPrompt(RAG_GENERATION_TEMPLATE, { scope: 'knowledge' })
+        // 发送即快照（§14.5）：把本轮实际发给模型的 system 落 internal 条目——审计忠实、抗版本漂移，
+        // 不靠事后重算（assembler/模板是会迭代的代码，重算会漂移）。RAG 单轮无 run，run_id 为 null。
+        await models.contextItems.insert({
+          id: uuidv7(),
+          conversationId,
+          kind: 'tool_result',
+          flags: { state: 'internal' },
+          content: system,
+          meta: { stage: 'system', name: 'rag_generation', summary: 'RAG 生成 system prompt 快照' },
+        })
         for await (const part of llm.chat.tier('standard').textStream({
           system,
           messages,
@@ -279,8 +288,8 @@ export function createChatService(deps: ChatDeps): ChatService {
     },
 
     async getContextDebug(p, conversationId) {
-      // system prompt 不整体入库：是 (静态模板 + 已落库事实) 的纯函数（DESIGN §8.2）。
-      // 下方 systemView 跑同一 assembler 忠实重建各路径/各 run 的实际 system —— 解原 TODO。
+      // system prompt 审计忠实（DESIGN §8.2）：实际发送值随轮快照落库（internal, stage=system），
+      // 此处直接读快照——不重算重建（assembler/模板是会迭代的代码，重算会随版本漂移）。
       const cv = await loadWithAccess(p, conversationId, 'viewer')
       // 原始上下文：context_items 全量、全序、未过滤（含 meta/flags）。
       const rows = await models.contextItems.listByConversation(conversationId)
@@ -292,28 +301,16 @@ export function createChatService(deps: ChatDeps): ChatService {
         agentName: r.agent_name,
         status: r.status,
       }))
-      // systemView：按确定性 facts（会话作用域）重建各路径实际 system prompt。
-      const scope = cv.collection_id ? ('knowledge' as const) : ('global' as const)
-      const systemView: { runId: string | null; label: string; content: string }[] = []
-      // RAG 单轮路径（run_id 为 null，仅知识库会话）。
-      if (cv.collection_id) {
-        systemView.push({
-          runId: null,
-          label: 'RAG 生成 (chat)',
-          content: assembleSystemPrompt(RAG_GENERATION_TEMPLATE, { scope: 'knowledge' }),
-        })
-      }
-      // 每个 agent run：按 agentName 选模板重建。
-      for (const r of runs) {
-        const def = AGENT_DEFS[r.agentName]
-        if (def) {
-          systemView.push({
-            runId: r.id,
-            label: r.agentName,
-            content: assembleSystemPrompt(def.system, { scope }),
-          })
-        }
-      }
+      // systemView：读已落库的 system 快照（忠实于发送当时）。run_id 标签取自 run 树；
+      // RAG 单轮（run_id 为 null）标 'RAG 生成 (chat)'。
+      const runAgentName = new Map(runs.map((r) => [r.id, r.agentName]))
+      const systemView = rows
+        .filter((r) => r.meta?.stage === 'system')
+        .map((r) => ({
+          runId: r.run_id,
+          label: r.run_id ? (runAgentName.get(r.run_id) ?? 'agent') : 'RAG 生成 (chat)',
+          content: r.content,
+        }))
       return {
         conversation: toConversation(cv),
         runs,

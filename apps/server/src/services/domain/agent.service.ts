@@ -100,12 +100,6 @@ const GLOBAL_ASSISTANT: AgentDef = {
   maxSteps: 12,
 }
 
-/** agentName → 定义。debug 页据此按 run 的 agent_name 重建该 run 的实际 system prompt（§14.5）。 */
-export const AGENT_DEFS: Record<string, AgentDef> = {
-  [KNOWLEDGE_ASSISTANT.name]: KNOWLEDGE_ASSISTANT,
-  [GLOBAL_ASSISTANT.name]: GLOBAL_ASSISTANT,
-}
-
 /** wall-clock 熔断（ms）。 */
 const RUN_WALL_CLOCK_MS = 120_000
 /** 近似 token 预算（按字符数估算）的字符上限。 */
@@ -245,9 +239,19 @@ export function createAgentService(deps: AgentDeps): AgentService {
       }
 
       // 动态 system：稳定模板（agentDef.system）+ 确定性 facts（会话作用域）。
-      // debug 页用同一 assembler 按 run 的 agent_name 重建（§14.5），故此处与重建必须一致。
       const system = assembleSystemPrompt(agentDef.system, {
         scope: cv.collection_id ? 'knowledge' : 'global',
+      })
+      // 发送即快照（§14.5）：把本 run 实际发给模型的 system 落 internal 条目（归属本 run）——
+      // 审计忠实、抗版本漂移，不靠事后重算（assembler/模板是会迭代的代码）。
+      await models.contextItems.insert({
+        id: uuidv7(),
+        conversationId,
+        runId,
+        kind: 'tool_result',
+        flags: { state: 'internal' },
+        content: system,
+        meta: { stage: 'system', name: agentDef.name, summary: 'agent system prompt 快照' },
       })
       // 本轮 user 已落库 → 投影含本轮 user；runtime 不再自拼 [system, user]。
       const initialMessages = projectForLlm([...priorItems, toContextItemView(userItem)], {
