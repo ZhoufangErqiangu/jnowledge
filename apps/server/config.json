@@ -15,18 +15,24 @@
         }
       },
       "models": {
-        "deepseek-v4-pro": { "provider": "deepseek", "model": "deepseek-v4-pro" },
-        "deepseek-v4-flash": { "provider": "deepseek", "model": "deepseek-v4-flash" },
-        "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B": {
+        "deepseek-v4-pro": {
+          "provider": "deepseek",
+          "model": "deepseek-v4-pro"
+        },
+        "deepseek-v4-flash": {
+          "provider": "deepseek",
+          "model": "deepseek-v4-flash"
+        },
+        "qwen3.5-4b": {
           "provider": "siliconflow",
-          "model": "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B"
+          "model": "Qwen/Qwen3.5-4B"
         }
       },
       "tiers": {
         "heavy": "deepseek-v4-pro",
         "standard": "deepseek-v4-flash",
         "light": "deepseek-v4-flash",
-        "nano": "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B"
+        "nano": "qwen3.5-4b"
       }
     },
     "embedding": {

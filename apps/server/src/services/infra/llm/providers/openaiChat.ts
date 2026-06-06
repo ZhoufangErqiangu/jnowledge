@@ -48,12 +48,21 @@ export abstract class OpenAIChatProvider implements LLMCapability {
    */
   protected abstract thinkingBody(opts: { thinking?: Thinking }): Record<string, unknown>
 
-  private async rawChat(body: Record<string, unknown>): Promise<Response> {
-    const res = await fetch(this.chatUrl, {
-      method: 'POST',
-      headers: this.headers,
-      body: JSON.stringify(body),
-    })
+  private async rawChat(body: Record<string, unknown>, timeoutMs?: number): Promise<Response> {
+    const ms = timeoutMs ?? DEFAULT_CALL_TIMEOUT_MS
+    // AbortSignal.timeout 覆盖整次请求生命周期（建连 + 流式 body 读取）：无响应/中途 stall 都会被 abort，
+    // 把"挂死"转成可熔断的 timeout 错误（流式 body 的 reader.read() 也会随之 reject，见 wrapAbort）。
+    let res: Response
+    try {
+      res = await fetch(this.chatUrl, {
+        method: 'POST',
+        headers: this.headers,
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(ms),
+      })
+    } catch (err) {
+      throw asTimeoutOrRethrow(err, ms)
+    }
     if (!res.ok) {
       const detail = await res.text().catch(() => '')
       throw new LlmError(`provider ${res.status}: ${detail.slice(0, 500)}`, 'provider')
@@ -63,13 +72,16 @@ export abstract class OpenAIChatProvider implements LLMCapability {
 
   async text(opts: TextOptions): Promise<string> {
     const startedAt = Date.now()
-    const res = await this.rawChat({
-      model: opts.model ?? this.cfg.model,
-      messages: buildMessages(opts),
-      ...this.thinkingBody(opts),
-      ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
-      ...(opts.maxTokens !== undefined ? { max_tokens: opts.maxTokens } : {}),
-    })
+    const res = await this.rawChat(
+      {
+        model: opts.model ?? this.cfg.model,
+        messages: buildMessages(opts),
+        ...this.thinkingBody(opts),
+        ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
+        ...(opts.maxTokens !== undefined ? { max_tokens: opts.maxTokens } : {}),
+      },
+      opts.timeoutMs,
+    )
     const json = (await res.json()) as ChatCompletion
     emitStat(opts, startedAt, json.usage)
     // 仅返回最终答案；thinking 的 reasoning_content 在非流式下丢弃。
@@ -77,16 +89,19 @@ export abstract class OpenAIChatProvider implements LLMCapability {
   }
 
   async *textStream(opts: TextOptions): AsyncIterable<StreamChunk> {
-    const res = await this.rawChat({
-      model: opts.model ?? this.cfg.model,
-      messages: buildMessages(opts),
-      stream: true,
-      ...this.thinkingBody(opts),
-      ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
-      ...(opts.maxTokens !== undefined ? { max_tokens: opts.maxTokens } : {}),
-    })
+    const res = await this.rawChat(
+      {
+        model: opts.model ?? this.cfg.model,
+        messages: buildMessages(opts),
+        stream: true,
+        ...this.thinkingBody(opts),
+        ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
+        ...(opts.maxTokens !== undefined ? { max_tokens: opts.maxTokens } : {}),
+      },
+      opts.timeoutMs,
+    )
     if (!res.body) throw new LlmError('流式响应无 body', 'provider')
-    yield* parseSSE(res.body)
+    yield* wrapAbort(parseSSE(res.body), opts.timeoutMs)
   }
 
   async object<T>(schema: z.ZodType<T>, opts: ObjectOptions): Promise<T> {
@@ -108,23 +123,33 @@ export abstract class OpenAIChatProvider implements LLMCapability {
 
       let res: Response
       try {
-        res = await this.rawChat({
-          model: opts.model ?? this.cfg.model,
-          messages,
-          response_format: useStrict
-            ? { type: 'json_schema', json_schema: { name: 'result', schema: jsonSchema, strict: true } }
-            : { type: 'json_object' },
-          ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
-        })
+        res = await this.rawChat(
+          {
+            model: opts.model ?? this.cfg.model,
+            messages,
+            response_format: useStrict
+              ? { type: 'json_schema', json_schema: { name: 'result', schema: jsonSchema, strict: true } }
+              : { type: 'json_object' },
+            ...this.thinkingBody(opts),
+            ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
+          },
+          opts.timeoutMs,
+        )
       } catch (err) {
+        // 超时不降级：换 response_format 无济于事，直接上抛（让调用方按 timeout 处理，如过滤的 fail-open）。
+        if (err instanceof LlmError && err.kind === 'timeout') throw err
         // 供应商不支持 json_schema → 当轮立即降级到 json_object（注入 schema 文本）。
         if (useStrict) {
-          res = await this.rawChat({
-            model: opts.model ?? this.cfg.model,
-            messages: injectSchema(baseMessages, schemaText),
-            response_format: { type: 'json_object' },
-            ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
-          })
+          res = await this.rawChat(
+            {
+              model: opts.model ?? this.cfg.model,
+              messages: injectSchema(baseMessages, schemaText),
+              response_format: { type: 'json_object' },
+              ...this.thinkingBody(opts),
+              ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
+            },
+            opts.timeoutMs,
+          )
         } else {
           throw err
         }
@@ -148,27 +173,54 @@ export abstract class OpenAIChatProvider implements LLMCapability {
   }
 
   async *generateStream(opts: GenerateOptions): AsyncIterable<AgentChunk> {
-    const res = await this.rawChat({
-      model: this.cfg.model,
-      messages: toApiMessages(opts.messages),
-      tools: opts.tools.map((t) => ({
-        type: 'function',
-        function: { name: t.name, description: t.description, parameters: t.parameters },
-      })),
-      tool_choice: 'auto',
-      stream: true,
-      // 流末附带 token 用量（OpenAI 形状：最后一个 choices=[] 的 chunk 带 usage）。供应商不支持则静默无此 chunk。
-      stream_options: { include_usage: true },
-      ...this.thinkingBody(opts),
-      ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
-      ...(opts.maxTokens !== undefined ? { max_tokens: opts.maxTokens } : {}),
-    })
+    const res = await this.rawChat(
+      {
+        model: this.cfg.model,
+        messages: toApiMessages(opts.messages),
+        tools: opts.tools.map((t) => ({
+          type: 'function',
+          function: { name: t.name, description: t.description, parameters: t.parameters },
+        })),
+        tool_choice: 'auto',
+        stream: true,
+        // 流末附带 token 用量（OpenAI 形状：最后一个 choices=[] 的 chunk 带 usage）。供应商不支持则静默无此 chunk。
+        stream_options: { include_usage: true },
+        ...this.thinkingBody(opts),
+        ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
+        ...(opts.maxTokens !== undefined ? { max_tokens: opts.maxTokens } : {}),
+      },
+      opts.timeoutMs,
+    )
     if (!res.body) throw new LlmError('流式响应无 body', 'provider')
-    yield* parseToolStream(res.body)
+    yield* wrapAbort(parseToolStream(res.body), opts.timeoutMs)
   }
 }
 
 // ---- OpenAI 形状的请求/响应辅助：基类专用，对子类不可见 ----
+
+/**
+ * 单次 HTTP 调用默认超时（ms）。对齐 run wall-clock 熔断（120s）——单次 LLM 调用本就不该超过整个 run 预算；
+ * 主要兜底"provider 无响应/中途 stall 导致请求永久挂起"。需要更紧的调用方（如并发的 RAG 过滤）自带更短 timeoutMs。
+ */
+const DEFAULT_CALL_TIMEOUT_MS = 120_000
+
+/** AbortSignal.timeout 触发时，把 abort/timeout 异常归一成 LlmError(kind='timeout')；其余原样上抛。 */
+function asTimeoutOrRethrow(err: unknown, ms: number): unknown {
+  if (err instanceof DOMException && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
+    return new LlmError(`provider 调用超时（${ms}ms 无响应）`, 'timeout', err)
+  }
+  return err
+}
+
+/** 包裹流式生成器：把 body 读取过程中的 abort/timeout 归一成 LlmError(kind='timeout')。 */
+async function* wrapAbort<T>(it: AsyncIterable<T>, timeoutMs?: number): AsyncIterable<T> {
+  const ms = timeoutMs ?? DEFAULT_CALL_TIMEOUT_MS
+  try {
+    yield* it
+  } catch (err) {
+    throw asTimeoutOrRethrow(err, ms)
+  }
+}
 
 function buildMessages(opts: TextOptions): ChatMessage[] {
   if (opts.messages) return opts.messages

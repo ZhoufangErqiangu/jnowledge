@@ -65,6 +65,12 @@ export interface TextOptions {
   /** 覆盖默认模型（一般不用，tier 已绑模型） */
   model?: string
   /**
+   * 单次 HTTP 调用的超时（ms）。不传走 provider 默认（DEFAULT_CALL_TIMEOUT_MS）。
+   * 超时即 abort 并抛 LlmError(kind='timeout')——把"无响应挂死"转成可熔断的错误。
+   * 并发小调用（如 RAG 相关性过滤逐片段）应传更短的值，避免一条 stall 拖垮整批。
+   */
+  timeoutMs?: number
+  /**
    * 非流式调用（text/object）的统计回调：调用成功时回报本次耗时 + token 用量。
    * 供需要落库/归因的调用方按需传入；不传则零开销。流式路径（generateStream）自带 usage 分段，不走此回调。
    */
@@ -133,6 +139,8 @@ export interface GenerateOptions {
   thinking?: Thinking
   temperature?: number
   maxTokens?: number
+  /** 单次 HTTP 调用超时（ms）。见 TextOptions.timeoutMs。 */
+  timeoutMs?: number
 }
 
 /**
@@ -205,7 +213,7 @@ export interface LLMClient {
 export class LlmError extends Error {
   constructor(
     message: string,
-    readonly kind: 'provider' | 'validation' | 'unconfigured' = 'provider',
+    readonly kind: 'provider' | 'validation' | 'unconfigured' | 'timeout' = 'provider',
     override readonly cause?: unknown,
   ) {
     super(message)

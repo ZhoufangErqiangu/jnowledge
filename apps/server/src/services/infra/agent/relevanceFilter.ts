@@ -28,6 +28,9 @@ export interface RelevanceFilter {
   filter(query: string, chunks: RetrievedChunk[]): Promise<FilterResult>
 }
 
+/** 单片段相关性判定的超时（ms）。二分类本是秒级；超时即按 fail-open 保留，不让一条 stall 拖垮整批。 */
+const FILTER_CALL_TIMEOUT_MS = 20_000
+
 const decisionSchema = z.object({
   keep: z.boolean().describe('该资料片段是否与问题相关、值得作为回答依据：true=保留，false=丢弃'),
   reason: z.string().describe('一句话中文说明保留/丢弃的理由'),
@@ -69,6 +72,10 @@ export function createRelevanceFilter(
               system: SYSTEM,
               prompt: `检索查询：${query}\n\n候选资料《${c.documentTitle}》：\n${c.context}\n\n该资料是否与查询相关？`,
               temperature: 0,
+              // 二分类无需思维链：显式关思考（省 token、避免纯推理模型把秒级判断拖成分钟级）。
+              thinking: false,
+              // 逐片段并发：一条 provider stall 不能拖垮整批（Promise.all 等最慢）。超时→抛→下方 fail-open 保留。
+              timeoutMs: FILTER_CALL_TIMEOUT_MS,
               onStat: (s) => {
                 if (s.usage) {
                   sawUsage = true
