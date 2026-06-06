@@ -77,6 +77,17 @@ services:
       migrate:
         condition: service_completed_successfully
 
+  # 前端：纯静态托管 SPA（不反代 API；API 路由由上游网关负责）。与 app 无运行期依赖。
+  web:
+    profiles: [app]
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    image: jnowledge-web:latest
+    restart: unless-stopped
+    ports:
+      - '8080:80'
+
 volumes:
   pgdata:
   miniodata:
