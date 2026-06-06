@@ -19,11 +19,7 @@ export {
   type AuditVerdict,
 } from './operationAuditor.js'
 export { createRelevanceFilter, type RelevanceFilter } from './relevanceFilter.js'
-export {
-  assembleSystemPrompt,
-  RAG_GENERATION_TEMPLATE,
-  type SystemFacts,
-} from './systemPrompt.js'
+export { assembleSystemPrompt, type SystemFacts } from './systemPrompt.js'
 export {
   type ContextItemView,
   toContextItemView,

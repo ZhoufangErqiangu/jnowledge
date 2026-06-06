@@ -3,7 +3,6 @@ import type { Models } from '../../models/index.js'
 import type { EnrichedChunkRow } from '../../models/chunk.repo.js'
 import type { Infra } from '../infra/index.js'
 import type { Logger } from '../../logger.js'
-import type { ChatMessage } from '../infra/llm/types.js'
 
 /** 检索命中：一条 chunk + 定位信息 + 小到大组装后的上下文。 */
 export interface RetrievedChunk {
@@ -37,8 +36,6 @@ export interface RetrievalDeps {
 }
 
 export interface RetrievalService {
-  /** 结合会话历史把追问改写成可独立检索的查询（指代消解/补全）。 */
-  rewriteQuery(question: string, history: ChatMessage[]): Promise<string>
   /** 完整混合检索：向量∥全文 → RRF → rerank → 小到大组装。返回 topK 命中。 */
   retrieve(collectionId: string, query: string): Promise<RetrievedChunk[]>
   /**
@@ -59,27 +56,6 @@ export function createRetrievalService(deps: RetrievalDeps): RetrievalService {
   const { config, models, infra, logger } = deps
   const { llm, vectorStore } = infra
   const { vectorTopK, ftsTopK, rerankTopK, rrfK } = config.rag
-
-  async function rewriteQuery(question: string, history: ChatMessage[]): Promise<string> {
-    if (!llm.chat.configured || history.length === 0) return question
-    const transcript = history
-      .slice(-6)
-      .map((m) => `${m.role === 'user' ? '用户' : '助手'}：${m.content}`)
-      .join('\n')
-    try {
-      const rewritten = await llm.chat.tier('nano').text({
-        system:
-          '你是检索查询改写器。根据对话历史，把用户的最新追问改写成一个语义完整、可独立用于知识库检索的查询。消解指代（它/这个/那个等），补全省略的主语。只输出改写后的查询，不要解释。',
-        prompt: `对话历史：\n${transcript}\n\n最新追问：${question}\n\n改写后的查询：`,
-        temperature: 0,
-      })
-      const out = rewritten.trim()
-      return out.length > 0 ? out : question
-    } catch (err) {
-      logger.warn({ err }, 'query 改写失败，使用原始查询')
-      return question
-    }
-  }
 
   async function retrieve(collectionId: string, query: string): Promise<RetrievedChunk[]> {
     // 1) 混合召回（并行）：向量 + 中文全文。
@@ -218,7 +194,7 @@ export function createRetrievalService(deps: RetrievalDeps): RetrievalService {
     }
   }
 
-  return { rewriteQuery, retrieve, searchGlobal }
+  return { retrieve, searchGlobal }
 }
 
 /** 轮转交错合并多个有序列表（按位次逐轮取，跨列表公平），保序去重。 */
