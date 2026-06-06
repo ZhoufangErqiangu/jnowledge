@@ -1,37 +1,54 @@
-// @ts-check
-import js from '@eslint/js'
-import tseslint from 'typescript-eslint'
-import prettier from 'eslint-config-prettier'
+import eslint from "@eslint/js";
+import { defineConfig } from "eslint/config";
+import globals from "globals";
+import tseslint from "typescript-eslint";
+import prettier from "eslint-config-prettier";
 
-export default tseslint.config(
-  {
-    ignores: ['**/dist/**', '**/node_modules/**', '**/*.d.ts', 'apps/web/dist/**'],
-  },
-  js.configs.recommended,
-  ...tseslint.configs.recommended,
-  {
-    // 纯 JS 运维脚本（如 scripts/*.mjs）：声明所需 Node 全局，避免 no-undef 误报。
-    files: ['**/*.mjs'],
-    languageOptions: {
-      sourceType: 'module',
-      globals: {
-        process: 'readonly',
-        console: 'readonly',
-        setTimeout: 'readonly',
+export default defineConfig({
+  extends: [
+    eslint.configs.recommended,
+    ...tseslint.configs.recommended,
+    prettier,
+    {
+      files: ["**/*.mjs"],
+      languageOptions: {
+        sourceType: "module",
+        globals: {
+          process: "readonly",
+          console: "readonly",
+          setTimeout: "readonly",
+        },
       },
     },
-  },
-  {
-    rules: {
-      '@typescript-eslint/no-unused-vars': [
-        'error',
-        { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
-      ],
-      '@typescript-eslint/consistent-type-imports': [
-        'error',
-        { prefer: 'type-imports', fixStyle: 'inline-type-imports' },
-      ],
+  ],
+  files: ["**/*.{ts}"],
+  languageOptions: {
+    ecmaVersion: "latest",
+    sourceType: "module",
+    globals: globals.node,
+    parserOptions: {
+      parser: tseslint.parser,
     },
   },
-  prettier,
-)
+  // 0 off 1 warn 2 error
+  rules: {
+    "@typescript-eslint/ban-ts-comment": 0,
+    "@typescript-eslint/no-unused-vars": [
+      "error",
+      { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
+    ],
+    "@typescript-eslint/consistent-type-imports": [
+      "error",
+      { prefer: "type-imports", fixStyle: "inline-type-imports" },
+    ],
+    quotes: [2, "double"],
+    semi: [2, "always"],
+    "no-console": 0,
+  },
+  ignores: [
+    "**/dist/**",
+    "**/node_modules/**",
+    "**/*.d.ts",
+    "apps/web/dist/**",
+  ],
+});
