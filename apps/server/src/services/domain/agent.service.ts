@@ -218,8 +218,16 @@ export function createAgentService(deps: AgentDeps): AgentService {
         citations,
       }
 
+      // 可访问库注入 system：模型直接用 id 检索，追问轮不再凭空臆造 collectionId（失败再 fallback）。
+      const availableCollections = await collectionService
+        .listAccessible(p)
+        .then((cs) => cs.map((c) => ({ id: c.id, name: c.name })))
+        .catch(() => undefined)
       // 动态 system：稳定模板（agentDef.system）+ 确定性 facts（本 run 作用域，顶层恒 principal）。
-      const system = assembleSystemPrompt(agentDef.system, { scope: { ceiling: 'principal' } })
+      const system = assembleSystemPrompt(agentDef.system, {
+        scope: { ceiling: 'principal' },
+        ...(availableCollections ? { availableCollections } : {}),
+      })
       // 发送即快照（§14.5）：把本 run 实际发给模型的 system 落 internal 条目（归属本 run）——
       // 审计忠实、抗版本漂移，不靠事后重算（assembler/模板是会迭代的代码）。
       await models.contextItems.insert({

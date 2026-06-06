@@ -13,6 +13,9 @@
  * 缓存友好：稳定模板前置、动态片段后置（保 DeepSeek 上下文缓存命中）。
  */
 
+/** 注入 system prompt 的可访问库上限：超过则不逐条列出（避免 prompt 膨胀），退回 list_collections。 */
+const MAX_LISTED_COLLECTIONS = 30
+
 export interface SystemFacts {
   /**
    * 本 run 的作用域天花板（呈现用，携库名）：
@@ -21,12 +24,31 @@ export interface SystemFacts {
    * 注意：这里携 title 供 prompt 措辞用，与 RunContext.scope（携 id 供运行时强制）区分。
    */
   scope: { ceiling: 'principal' | { id: string; title: string }[] }
+  /**
+   * principal 作用域下当前可访问的知识库（id + 名称）。注入 prompt 后模型直接用 id 检索、
+   * 通常无需再调 list_collections——尤其追问轮（工具结果跨轮回放仍可能被预算裁掉时）不再臆造 id。
+   * 确定性事实（listAccessible 的快照），符合 assembler「只拼已落库/确定性事实」的约束。
+   */
+  availableCollections?: { id: string; name: string }[]
 }
 
 /** 按 facts 派生的动态片段（后置；纯函数，仅依赖确定性 facts → 可重建）。 */
 function dynamicContext(facts: SystemFacts): string {
   const { ceiling } = facts.scope
   if (ceiling === 'principal') {
+    const cols = facts.availableCollections
+    if (cols && cols.length > 0 && cols.length <= MAX_LISTED_COLLECTIONS) {
+      const listed = cols.map((c) => `- ${c.id} :: ${c.name}`).join('\n')
+      return [
+        '当前作用域：可访问你权限范围内的全部知识库。以下是当前可访问的知识库（id :: 名称），',
+        '可直接用对应 id 调用 knowledge_search 检索，通常无需再调 list_collections；',
+        '切勿臆造 id——若此列表为空或你怀疑已过期，再调 list_collections 复核。',
+        listed,
+      ].join('\n')
+    }
+    if (cols && cols.length === 0) {
+      return '当前作用域：你当前没有任何可访问的知识库；需要库内检索时请如实说明无可用资料。'
+    }
     return '当前作用域：可访问你权限范围内的全部知识库；需要选库时用 list_collections 查看再以其 id 检索。'
   }
   const libs = ceiling.map((c) => `《${c.title}》`).join('') || '（空）'
