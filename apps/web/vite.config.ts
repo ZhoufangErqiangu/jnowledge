@@ -9,6 +9,7 @@ const API_PREFIXES = [
   '/collections',
   '/documents',
   '/conversations',
+  '/search',
   '/openapi.json',
   '/docs',
 ]
