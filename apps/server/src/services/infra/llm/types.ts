@@ -6,6 +6,12 @@ export interface LlmUsage {
   promptTokens: number
   completionTokens: number
   totalTokens: number
+  /**
+   * 输入 token 中命中供应商 prompt cache 的部分（DeepSeek prompt_cache_hit_tokens /
+   * OpenAI prompt_tokens_details.cached_tokens）。命中部分计费远低于未命中，用于成本归因。
+   * 供应商不回报缓存用量时缺省。
+   */
+  cachedPromptTokens?: number
 }
 
 /**

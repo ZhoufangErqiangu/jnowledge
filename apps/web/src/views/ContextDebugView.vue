@@ -75,7 +75,7 @@ function hasMeta(meta: Record<string, unknown>): boolean {
 /** 一条 assistant 对应那次 LLM 调用的耗时 + token 用量（meta.llm，由 runtime 实测落库）。 */
 interface LlmStat {
   durationMs: number
-  usage?: { promptTokens: number; completionTokens: number; totalTokens: number }
+  usage?: { promptTokens: number; completionTokens: number; totalTokens: number; cachedPromptTokens?: number }
 }
 function llmStat(it: ContextItemDebug): LlmStat | null {
   const llm = it.meta.llm as LlmStat | undefined
@@ -168,6 +168,14 @@ function back() {
                   (↑{{ fmtTokens(llmStat(it)!.usage!.promptTokens) }}
                   ↓{{ fmtTokens(llmStat(it)!.usage!.completionTokens) }})
                 </span>
+                <span
+                  v-if="llmStat(it)!.usage?.cachedPromptTokens"
+                  class="llm-pill cache-pill"
+                  title="prompt cache 命中：输入 token 中命中缓存的部分（命中部分计费更低）"
+                >
+                  💾 命中 {{ fmtTokens(llmStat(it)!.usage!.cachedPromptTokens!) }} tok
+                  ({{ Math.round((llmStat(it)!.usage!.cachedPromptTokens! / llmStat(it)!.usage!.promptTokens) * 100) }}%)
+                </span>
               </span>
               <span class="ts">{{ new Date(it.createdAt).toLocaleString() }}</span>
             </div>
@@ -217,6 +225,14 @@ function back() {
                   🔢 {{ fmtTokens(llmStat(it)!.usage!.totalTokens) }} tok
                   (↑{{ fmtTokens(llmStat(it)!.usage!.promptTokens) }}
                   ↓{{ fmtTokens(llmStat(it)!.usage!.completionTokens) }})
+                </span>
+                <span
+                  v-if="llmStat(it)!.usage?.cachedPromptTokens"
+                  class="llm-pill cache-pill"
+                  title="prompt cache 命中：输入 token 中命中缓存的部分（命中部分计费更低）"
+                >
+                  💾 命中 {{ fmtTokens(llmStat(it)!.usage!.cachedPromptTokens!) }} tok
+                  ({{ Math.round((llmStat(it)!.usage!.cachedPromptTokens! / llmStat(it)!.usage!.promptTokens) * 100) }}%)
                 </span>
               </span>
               <span class="ts">{{ new Date(it.createdAt).toLocaleString() }}</span>
@@ -358,6 +374,10 @@ function back() {
   border-radius: 4px;
   padding: 1px 6px;
   white-space: nowrap;
+}
+/* 缓存命中 pill：绿色凸显，与普通耗时/用量 pill 区分。 */
+.cache-pill {
+  color: var(--el-color-success);
 }
 .content {
   margin: 0;

@@ -32,7 +32,7 @@ export interface ContextItemMeta {
    */
   llm?: {
     durationMs: number
-    usage?: { promptTokens: number; completionTokens: number; totalTokens: number }
+    usage?: { promptTokens: number; completionTokens: number; totalTokens: number; cachedPromptTokens?: number }
   }
   /**
    * 子推理 / 快照类别（仅 internal 状态条目用）：标注这条留痕来自哪个 stage——

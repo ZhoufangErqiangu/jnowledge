@@ -61,6 +61,7 @@ export function createRelevanceFilter(
       let promptTokens = 0
       let completionTokens = 0
       let totalTokens = 0
+      let cachedPromptTokens = 0
       let sawUsage = false
       const startedAt = Date.now()
 
@@ -82,6 +83,7 @@ export function createRelevanceFilter(
                   promptTokens += s.usage.promptTokens
                   completionTokens += s.usage.completionTokens
                   totalTokens += s.usage.totalTokens
+                  if (s.usage.cachedPromptTokens) cachedPromptTokens += s.usage.cachedPromptTokens
                 }
               },
             })
@@ -95,7 +97,16 @@ export function createRelevanceFilter(
 
       const llm: LlmCallStat = {
         durationMs: Date.now() - startedAt,
-        ...(sawUsage ? { usage: { promptTokens, completionTokens, totalTokens } } : {}),
+        ...(sawUsage
+          ? {
+              usage: {
+                promptTokens,
+                completionTokens,
+                totalTokens,
+                ...(cachedPromptTokens > 0 ? { cachedPromptTokens } : {}),
+              },
+            }
+          : {}),
       }
 
       const kept: RetrievedChunk[] = []

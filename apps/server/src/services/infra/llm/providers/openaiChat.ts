@@ -266,7 +266,19 @@ function injectSchema(messages: ChatMessage[], schemaText: string, repairErr?: s
 
 interface ChatCompletion {
   choices: { message?: { content?: string; reasoning_content?: string } }[]
-  usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }
+  usage?: ApiUsage
+}
+
+/**
+ * OpenAI 形状的 usage（snake_case，字段可缺）。除基础三项外含两类缓存命中字段：
+ * DeepSeek 的 prompt_cache_hit_tokens / OpenAI·SiliconFlow 的 prompt_tokens_details.cached_tokens。
+ */
+interface ApiUsage {
+  prompt_tokens?: number
+  completion_tokens?: number
+  total_tokens?: number
+  prompt_cache_hit_tokens?: number
+  prompt_tokens_details?: { cached_tokens?: number }
 }
 
 function safeJsonParse(raw: string): { ok: true; value: unknown } | { ok: false } {
@@ -315,7 +327,7 @@ async function* parseToolStream(body: ReadableStream<Uint8Array>): AsyncIterable
               tool_calls?: { index?: number; id?: string; function?: { name?: string; arguments?: string } }[]
             }
           }[]
-          usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }
+          usage?: ApiUsage
         }
         if (json.usage) usage = toLlmUsage(json.usage)
         const delta = json.choices?.[0]?.delta
@@ -348,18 +360,20 @@ async function* parseToolStream(body: ReadableStream<Uint8Array>): AsyncIterable
   if (usage) yield { type: 'usage', usage }
 }
 
-/** OpenAI 形状 usage（snake_case，字段可缺）→ 归一化 LlmUsage；缺失计 0，total 缺则由分项相加。 */
-function toLlmUsage(u: {
-  prompt_tokens?: number
-  completion_tokens?: number
-  total_tokens?: number
-}): LlmUsage {
+/**
+ * OpenAI 形状 usage（snake_case，字段可缺）→ 归一化 LlmUsage；缺失计 0，total 缺则由分项相加。
+ * 缓存命中数优先读 DeepSeek 的 prompt_cache_hit_tokens，回退 OpenAI 的 prompt_tokens_details.cached_tokens；
+ * 两者都缺则不带 cachedPromptTokens（区分「未命中=0」与「供应商不回报」）。
+ */
+function toLlmUsage(u: ApiUsage): LlmUsage {
   const promptTokens = u.prompt_tokens ?? 0
   const completionTokens = u.completion_tokens ?? 0
+  const cachedPromptTokens = u.prompt_cache_hit_tokens ?? u.prompt_tokens_details?.cached_tokens
   return {
     promptTokens,
     completionTokens,
     totalTokens: u.total_tokens ?? promptTokens + completionTokens,
+    ...(cachedPromptTokens !== undefined ? { cachedPromptTokens } : {}),
   }
 }
 
@@ -367,7 +381,7 @@ function toLlmUsage(u: {
 function emitStat(
   opts: { onStat?: (stat: LlmCallStat) => void },
   startedAt: number,
-  usage: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | undefined,
+  usage: ApiUsage | undefined,
 ): void {
   if (!opts.onStat) return
   opts.onStat({ durationMs: Date.now() - startedAt, ...(usage ? { usage: toLlmUsage(usage) } : {}) })
