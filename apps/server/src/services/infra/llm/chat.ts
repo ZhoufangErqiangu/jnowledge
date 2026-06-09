@@ -1,6 +1,6 @@
-import type { Config } from '../../../config/index.js'
 import type { LlmTier } from '@jnowledge/shared'
-import { createChatProvider } from './providerRegistry.js'
+import type { Config } from '../../../config/index.js'
+import { createChatProvider } from './provider.js'
 import { type ChatService, type LLMCapability, LlmError } from './types.js'
 
 type ChatConfig = Config['llm']['chat']
