@@ -95,7 +95,8 @@ function fmtTokens(n: number): string {
 const STAGE_LABEL: Record<string, string> = {
   safety: '安全裁决',
   rag_filter: 'RAG 过滤',
-  system: 'system 快照',
+  system: 'system 前缀',
+  scope: '作用域后缀',
 }
 
 /** internal 条目（按 raw 全序）。stage 标注类别；无 stage 的 internal 多为子 agent 轮。 */
@@ -268,7 +269,17 @@ function back() {
         <div v-if="systemView.length" class="sys-rebuild">
           <span class="block-label">system prompt 快照</span>
           <el-collapse class="meta-collapse">
-            <el-collapse-item v-for="(s, i) in systemView" :key="i" :title="s.label">
+            <el-collapse-item v-for="(s, i) in systemView" :key="i">
+              <template #title>
+                <el-tag
+                  size="small"
+                  effect="plain"
+                  :type="s.stage === 'scope' ? 'success' : 'info'"
+                >
+                  {{ STAGE_LABEL[s.stage] ?? s.stage }}
+                </el-tag>
+                <span style="margin-left: 8px">{{ s.label }}</span>
+              </template>
               <pre class="content">{{ s.content }}</pre>
             </el-collapse-item>
           </el-collapse>

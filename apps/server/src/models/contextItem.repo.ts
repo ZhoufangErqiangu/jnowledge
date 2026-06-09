@@ -37,9 +37,10 @@ export interface ContextItemMeta {
   /**
    * 子推理 / 快照类别（仅 internal 状态条目用）：标注这条留痕来自哪个 stage——
    * safety=写操作安全判级；rag_filter=RAG 抽取式相关性过滤决策；
-   * system=实际发送给模型的 system prompt 快照（§14.5：不重算重建，发送即快照，抗版本漂移）。
+   * system=实际发送给模型的 system prompt 稳定前缀快照；scope=易变作用域后缀快照
+   * （§14.5：均不重算重建，发送即快照，抗版本漂移；前缀置消息序最前、后缀贴最新 user 轮以保缓存）。
    */
-  stage?: 'safety' | 'rag_filter' | 'system'
+  stage?: 'safety' | 'rag_filter' | 'system' | 'scope'
   /** 子推理的结构化判决留痕（如安全判级 verdict、过滤保留/丢弃明细）。 */
   verdict?: unknown
   seq?: number

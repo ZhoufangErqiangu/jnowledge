@@ -131,3 +131,28 @@ test('projectForLlm: internal tool_result（子推理留痕）不回放', () => 
   assert.ok(!msgs.some((m) => m.role === 'tool' && m.content.includes('rag_filter')))
   assert.ok(msgs.some((m) => m.role === 'tool' && m.content === '真实命中'))
 })
+
+test('projectForLlm: scopeSuffix 作为独立 system 插在最新 user 轮之前（缓存友好）', () => {
+  const items: ContextItemView[] = [
+    itemFull({ kind: 'user', content: '上一轮问题' }),
+    itemFull({ kind: 'assistant', content: '上一轮答案' }),
+    itemFull({ kind: 'user', content: '本轮追问' }),
+  ]
+  const msgs = projectForLlm(items, { system: 'SYS', scopeSuffix: '当前作用域：库A', budget: 1_000_000 })
+  assert.deepEqual(msgs, [
+    { role: 'system', content: 'SYS' }, // 稳定前缀置最前
+    { role: 'user', content: '上一轮问题' },
+    { role: 'assistant', content: '上一轮答案' },
+    { role: 'system', content: '当前作用域：库A' }, // 易变后缀贴最新 user 轮之前
+    { role: 'user', content: '本轮追问' },
+  ])
+})
+
+test('projectForLlm: 无 scopeSuffix 时消息序不变（向后兼容）', () => {
+  const items: ContextItemView[] = [itemFull({ kind: 'user', content: '本轮' })]
+  const msgs = projectForLlm(items, { system: 'SYS', budget: 1_000_000 })
+  assert.deepEqual(msgs, [
+    { role: 'system', content: 'SYS' },
+    { role: 'user', content: '本轮' },
+  ])
+})

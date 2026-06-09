@@ -180,17 +180,30 @@ function trimBlocks(blocks: LlmBlock[], budget: number): LlmBlock[] {
 }
 
 /**
- * LLM 视图（agent ReAct）：[system?, ...预算内历史块]。本轮 user 已在 items 中（service 先落库）。
- * 跨轮回放工具回合（assistant.toolCalls + tool 回复），上一轮工具拿到的事实带进本轮。
+ * LLM 视图（agent ReAct）：[system?, ...预算内历史块, scopeSuffix?(贴最新 user 轮)]。
+ * 本轮 user 已在 items 中（service 先落库），是最后一块。跨轮回放工具回合（assistant.toolCalls
+ * + tool 回复），上一轮工具拿到的事实带进本轮。
+ *
+ * scopeSuffix（易变作用域后缀，见 systemPrompt.buildScopeSuffix）作为独立 system 消息插在
+ * **最新 user 轮之前**：稳定 system + 历史构成可缓存前缀，作用域变化只让此尾部失效（实测 ~93%
+ * 命中 vs 放前缀中间的 0%）。它是每轮重新生成的临时注入、不进历史，故不参与 items/块裁剪。
  */
 export function projectForLlm(
   items: ContextItemView[],
-  opts: { system?: string; budget: number },
+  opts: { system?: string; scopeSuffix?: string; budget: number },
 ): AgentTurnMessage[] {
   const blocks = trimBlocks(llmBlocks(items), opts.budget)
   const messages: AgentTurnMessage[] = []
   if (opts.system !== undefined) messages.push({ role: 'system', content: opts.system })
   for (const b of blocks) messages.push(...b.msgs)
+  // 后缀插在最后一块（本轮 user）之前；若无历史块则置于 system 之后、序末。
+  if (opts.scopeSuffix) {
+    const lastBlockLen = blocks.length > 0 ? blocks[blocks.length - 1]!.msgs.length : 0
+    messages.splice(messages.length - lastBlockLen, 0, {
+      role: 'system',
+      content: opts.scopeSuffix,
+    })
+  }
   return messages
 }
 

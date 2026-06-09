@@ -6,6 +6,7 @@ import {
   type LlmCallStat,
   type RunContext,
   assembleSystemPrompt,
+  buildScopeSuffix,
   createGetDocumentTool,
   createKnowledgeSearchTool,
   createListCollectionsTool,
@@ -218,18 +219,21 @@ export function createAgentService(deps: AgentDeps): AgentService {
         citations,
       }
 
-      // 可访问库注入 system：模型直接用 id 检索，追问轮不再凭空臆造 collectionId（失败再 fallback）。
+      // 可访问库：注入易变作用域后缀，模型直接用 id 检索、追问轮不臆造 collectionId（失败再 fallback）。
       const availableCollections = await collectionService
         .listAccessible(p)
         .then((cs) => cs.map((c) => ({ id: c.id, name: c.name })))
         .catch(() => undefined)
-      // 动态 system：稳定模板（agentDef.system）+ 确定性 facts（本 run 作用域，顶层恒 principal）。
-      const system = assembleSystemPrompt(agentDef.system, {
-        scope: { ceiling: 'principal' },
+      const facts = {
+        scope: { ceiling: 'principal' as const },
         ...(availableCollections ? { availableCollections } : {}),
-      })
-      // 发送即快照（§14.5）：把本 run 实际发给模型的 system 落 internal 条目（归属本 run）——
-      // 审计忠实、抗版本漂移，不靠事后重算（assembler/模板是会迭代的代码）。
+      }
+      // 缓存友好分两路（DESIGN §8.2）：稳定前缀（顶层=纯模板）置消息序最前、长期可缓存；
+      // 易变可访问库列表走后缀（projectForLlm 插在历史之后、最新 user 轮之前），变化不动历史前缀。
+      const system = assembleSystemPrompt(agentDef.system, facts)
+      const scopeSuffix = buildScopeSuffix(facts)
+      // 发送即快照（§14.5）：把本 run 实际发给模型的 system 内容落 internal 条目（归属本 run）——
+      // 审计忠实、抗版本漂移，不靠事后重算。stage=system 为稳定前缀，stage=scope 为易变后缀。
       await models.contextItems.insert({
         id: uuidv7(),
         conversationId,
@@ -237,11 +241,23 @@ export function createAgentService(deps: AgentDeps): AgentService {
         kind: 'tool_result',
         flags: { state: 'internal' },
         content: system,
-        meta: { stage: 'system', name: agentDef.name, summary: 'agent system prompt 快照' },
+        meta: { stage: 'system', name: agentDef.name, summary: 'agent system prompt 前缀快照' },
       })
+      if (scopeSuffix) {
+        await models.contextItems.insert({
+          id: uuidv7(),
+          conversationId,
+          runId,
+          kind: 'tool_result',
+          flags: { state: 'internal' },
+          content: scopeSuffix,
+          meta: { stage: 'scope', name: agentDef.name, summary: 'agent 作用域后缀快照' },
+        })
+      }
       // 本轮 user 已落库 → 投影含本轮 user；runtime 不再自拼 [system, user]。
       const initialMessages = projectForLlm([...priorItems, toContextItemView(userItem)], {
         system,
+        ...(scopeSuffix ? { scopeSuffix } : {}),
         budget: HISTORY_CHAR_BUDGET,
       })
 

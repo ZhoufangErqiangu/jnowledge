@@ -114,12 +114,16 @@ export const agentRunNodeSchema = z.object({
 export type AgentRunNode = z.infer<typeof agentRunNodeSchema>
 
 /**
- * system prompt 重建条目（§14.5 / DESIGN §8.2）：system 不入库，是 (静态模板 + 已落库事实)
- * 的纯函数，debug 跑同一 assembler 忠实重建。runId 为 null 表示 RAG 单轮路径。
+ * system 输入快照条目（§14.5 / DESIGN §8.2）：发给模型的 system 内容随轮快照落库
+ * （internal），debug 直接读快照——不事后重算（assembler/模板是会迭代的代码，重算随版本漂移）。
+ * 一轮可有多条：`stage='system'` 为稳定前缀（缓存友好、置于消息序最前），
+ * `stage='scope'` 为易变作用域后缀（库列表等，置于历史之后、贴最新 user 轮，避免污染前缀缓存）。
+ * runId 为 null 表示历史遗留 / 非 agent 路径。
  */
 export const systemViewEntrySchema = z.object({
   runId: uuidSchema.nullable(),
   label: z.string(),
+  stage: z.enum(['system', 'scope']),
   content: z.string(),
 })
 export type SystemViewEntry = z.infer<typeof systemViewEntrySchema>

@@ -86,13 +86,15 @@ export function createChatService(deps: ChatDeps): ChatService {
         agentName: r.agent_name,
         status: r.status,
       }))
-      // systemView：读已落库的 system 快照（忠实于发送当时）。run_id 标签取自 run 树。
+      // systemView：读已落库的 system 输入快照（忠实于发送当时）。run_id 标签取自 run 树。
+      // 含稳定前缀（stage=system）与易变作用域后缀（stage=scope），按落库序保持「前缀在前」。
       const runAgentName = new Map(runs.map((r) => [r.id, r.agentName]))
       const systemView = rows
-        .filter((r) => r.meta?.stage === 'system')
+        .filter((r) => r.meta?.stage === 'system' || r.meta?.stage === 'scope')
         .map((r) => ({
           runId: r.run_id,
           label: r.run_id ? (runAgentName.get(r.run_id) ?? 'agent') : 'agent',
+          stage: r.meta?.stage as 'system' | 'scope',
           content: r.content,
         }))
       return {
