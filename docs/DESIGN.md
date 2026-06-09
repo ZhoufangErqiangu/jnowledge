@@ -207,6 +207,23 @@
 - 代价：每轮多存几百字的 system（append-only 日志接受这种冗余换忠实，与逐轮存 tool_result 同理）。比"给模板上版本号 + 维护不可变版本表"简单且不易出错（后者一旦忘了 bump 版本就静默漂移）。
 - 相关较弱隐患：`llmView`（推理视图）debug 也是重跑投影，投影改版会变；但它漂移的只是*呈现*（选取/裁剪/格式），**内容来源（user/assistant 文本）已落库**，故属合法的"当前投影视图"语义，非"那轮字面发送"。若要连完整发送 payload 都钉死，是另一可选项（逐次 LLM 调用快照整个 messages 数组），范围更大、暂不做。
 
+#### 8.2.1 system 内容按缓存切前缀 / 后缀（2026-06-09 增补）
+
+快照保证了"忠实可观测"，但 system 内容在**消息序里的位置**还有第二重约束：**前缀缓存**。LLM 上下文缓存按"最长公共前缀"匹配——system 是整请求前缀，**其中任何一字节变化使其之后的全部内容（含整段对话历史，最贵的那部分）缓存全失效**。故易变内容塞进 system 前缀，等于每次变化都打掉历史缓存。
+
+按「作用域易变性」切两路放置（`systemPrompt.ts`）：
+
+- **稳定前缀**（`assembleSystemPrompt`，置消息序最前、长期可缓存）：稳定模板 +（仅子 agent）**固定**作用域约束——子 agent 的 ceiling 在 `agentAsTool` 构造时锁死、整 run 不变，属稳定前缀，且语义上是不可逾越的硬边界。
+- **易变后缀**（`buildScopeSuffix`，独立 `{role:'system'}` 消息，经 `projectForLlm` 的 `scopeSuffix` 插在历史之后、最新 user 轮之前）：顶层 agent 的**易变**可访问库列表——跨轮可由用户收窄；放后缀使其变化只让小尾部失效、不动历史前缀。recency 上也更靠近问题、注意力更强。
+
+> 两种 agent 想要**相反**的放置位置，而这恰恰正确：易变性相反。子 agent scope 冻结 → 前缀（缓存最优）；顶层 scope 跨轮可变 → 后缀。
+
+实测背书（真 `DEEPSEEK_API_KEY` 打 `api.deepseek.com`）：① DeepSeek **接受非首位 / 末尾 system 消息**（HTTP 200 且 `reasoning_content` 证明模型确实读取）；② 同一长前缀改一次作用域——易变片段在**前缀中间** `prompt_cache_hit=0`（历史缓存全废），在**末尾后缀** `hit≈1536/1643 ≈93%`。**位置决定缓存，与角色无关。**
+
+与 §8.2 快照原则一致：后缀仍是 LLM 实际输入 → 仍随轮快照落库（`state=internal`，但 `meta.stage='scope'`，与前缀的 `stage='system'` 区分）。`getContextDebug` 的 systemView 两条都收并带 `stage` 标签。可观测性不丢，只是拆成两条。
+
+通用推论：**凡跨轮易变的上下文注入，一律放贴最新 user 轮的后缀，勿塞进 system 前缀。**（子 agent 前缀注入当前 dormant/TODO，待注册第二个 agent 再接线。）
+
 ### 8.3 使能原语：context_items 的「第三状态」
 
 现状条目只有两种命运：作为 `user`/`assistant`/`tool_result` **流过投影**（会污染 LLM / 用户视图），或像 `agentAsTool` 子 run 那样**整条丢弃**（不可见，见 `agentAsTool.ts` "不落 context_items"）。"全部写入原始上下文"这块基石需要第三种状态：
