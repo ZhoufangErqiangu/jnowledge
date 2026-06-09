@@ -2,11 +2,10 @@ import { z } from 'zod'
 import { uuidv7 } from 'uuidv7'
 import type { Citation } from '@jnowledge/shared'
 import type { ContextItemRepo } from '../../../../models/contextItem.repo.js'
-import type { CollectionService } from '../../../domain/collection.service.js'
-import type { RetrievalService, RetrievedChunk } from '../../../domain/retrieval.js'
+import type { CollectionService } from '../../collection.service.js'
+import type { RetrievalService, RetrievedChunk } from '../../retrieval.js'
 import type { FilterResult, RelevanceFilter } from '../relevanceFilter.js'
-import type { RunContext, Tool, ToolResult } from '../types.js'
-import { inCeiling, outOfScope } from '../scope.js'
+import { inCeiling, outOfScope, type RunContext, type Tool, type ToolResult } from '../../../infra/agent/index.js'
 
 const paramsSchema = z.object({
   query: z.string().min(1).describe('要在知识库中检索的查询（自然语言，尽量具体完整）'),

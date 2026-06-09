@@ -2,10 +2,16 @@ import { z } from 'zod'
 import { uuidv7 } from 'uuidv7'
 import type { AgentRunRepo } from '../../../models/agentRun.repo.js'
 import type { ContextItemRepo } from '../../../models/contextItem.repo.js'
-import { Agent } from './agent.js'
 import { createRunRecorder } from './runRecorder.js'
-import { narrow } from './scope.js'
-import { type AgentDef, type RunContext, type Tool, type ToolResult, MAX_AGENT_DEPTH } from './types.js'
+import {
+  Agent,
+  narrow,
+  type AgentDef,
+  type RunContext,
+  type Tool,
+  type ToolResult,
+  MAX_AGENT_DEPTH,
+} from '../../infra/agent/index.js'
 
 const paramsSchema = z.object({
   task: z.string().min(1).describe('交给子 agent 完成的子任务描述（自包含、明确）'),

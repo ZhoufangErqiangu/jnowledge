@@ -1,31 +1,29 @@
 import { uuidv7 } from 'uuidv7'
 import { ERROR_CODES, type AgentStreamEvent, type Citation } from '@jnowledge/shared'
-import type { Models } from '../../models/index.js'
+import type { Models } from '../../../models/index.js'
 import {
   type AgentDef,
   type LlmCallStat,
   type RunContext,
   Agent,
-  assembleSystemPrompt,
-  buildScopeSuffix,
-  createGetDocumentTool,
-  createKnowledgeSearchTool,
-  createListCollectionsTool,
-  createMutationTools,
-  createOperationAuditor,
-  createRelevanceFilter,
-  createRunRecorder,
   createToolRegistry,
-  projectForLlm,
-  toContextItemView,
-} from '../infra/agent/index.js'
-import type { Config } from '../../config/index.js'
-import type { Infra } from '../infra/index.js'
-import type { Logger } from '../../logger.js'
-import type { CollectionService, Principal } from './collection.service.js'
-import type { DocumentService } from './document.service.js'
-import type { RetrievalService } from './retrieval.js'
-import { AppError } from '../../errors.js'
+} from '../../infra/agent/index.js'
+import { assembleSystemPrompt, buildScopeSuffix } from './systemPrompt.js'
+import { projectForLlm, toContextItemView } from './projection.js'
+import { createRunRecorder } from './runRecorder.js'
+import { createOperationAuditor } from './operationAuditor.js'
+import { createRelevanceFilter } from './relevanceFilter.js'
+import { createGetDocumentTool } from './tools/getDocument.js'
+import { createKnowledgeSearchTool } from './tools/knowledgeSearch.js'
+import { createListCollectionsTool } from './tools/listCollections.js'
+import { createMutationTools } from './tools/mutations.js'
+import type { Config } from '../../../config/index.js'
+import type { Infra } from '../../infra/index.js'
+import type { Logger } from '../../../logger.js'
+import type { CollectionService, Principal } from '../collection.service.js'
+import type { DocumentService } from '../document.service.js'
+import type { RetrievalService } from '../retrieval.js'
+import { AppError } from '../../../errors.js'
 
 export interface AgentDeps {
   config: Config

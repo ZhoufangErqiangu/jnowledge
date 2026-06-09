@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import type { ChatService, LlmCallStat } from '../llm/types.js'
+import type { ChatService, LlmCallStat } from '../../infra/llm/types.js'
 
 /**
  * 写操作审计-改写 stage（五期 §14.6 / DESIGN §8.5）。

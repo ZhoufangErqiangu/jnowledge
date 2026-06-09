@@ -7,7 +7,7 @@ import {
   type CreateConversationRequest,
 } from '@jnowledge/shared'
 import type { Models } from '../../models/index.js'
-import { projectForChat, projectForUser, toContextItemView } from '../infra/agent/index.js'
+import { projectForChat, projectForUser, toContextItemView } from './agent/projection.js'
 import { toConversation } from '../../models/mappers.js'
 import type { CollectionService, Principal } from './collection.service.js'
 import { AppError } from '../../errors.js'

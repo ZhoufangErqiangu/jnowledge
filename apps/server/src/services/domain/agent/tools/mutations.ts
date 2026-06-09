@@ -1,14 +1,13 @@
 import { z } from 'zod'
 import { uuidv7 } from 'uuidv7'
-import type { CollectionService } from '../../../domain/collection.service.js'
-import type { DocumentService } from '../../../domain/document.service.js'
+import type { CollectionService } from '../../collection.service.js'
+import type { DocumentService } from '../../document.service.js'
 import type { CollectionRepo } from '../../../../models/collection.repo.js'
 import type { ContextItemRepo } from '../../../../models/contextItem.repo.js'
 import type { DocumentRepo } from '../../../../models/document.repo.js'
 import type { PendingOperationRepo } from '../../../../models/pendingOperation.repo.js'
 import type { AuditVerdict, OperationAuditor } from '../operationAuditor.js'
-import type { LlmCallStat, RunContext, Tool, ToolResult } from '../types.js'
-import { inCeiling } from '../scope.js'
+import { inCeiling, type LlmCallStat, type RunContext, type Tool, type ToolResult } from '../../../infra/agent/index.js'
 
 export interface MutationToolDeps {
   documentService: DocumentService

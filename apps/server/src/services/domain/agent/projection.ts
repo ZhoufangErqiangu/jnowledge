@@ -1,6 +1,6 @@
 import type { Citation, ContextItemKind, Message } from '@jnowledge/shared'
 import type { ContextItemFlags, ContextItemRow } from '../../../models/contextItem.repo.js'
-import type { AgentTurnMessage, ChatMessage, ToolCall } from '../llm/types.js'
+import type { AgentTurnMessage, ChatMessage, ToolCall } from '../../infra/llm/types.js'
 
 /**
  * 投影引擎：把全量上下文事件日志（context_items）派生成两类视图，均为纯函数、可单测。

@@ -1,8 +1,7 @@
 import { z } from 'zod'
 import type { Models } from '../../../../models/index.js'
-import type { CollectionService } from '../../../domain/collection.service.js'
-import type { Tool, ToolResult } from '../types.js'
-import { inCeiling } from '../scope.js'
+import type { CollectionService } from '../../collection.service.js'
+import { inCeiling, type Tool, type ToolResult } from '../../../infra/agent/index.js'
 
 const paramsSchema = z.object({
   documentId: z.string().describe('文档 id（通常来自 knowledge_search 命中的引用）'),

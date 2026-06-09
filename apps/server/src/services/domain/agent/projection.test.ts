@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { ContextItemState } from '@jnowledge/shared'
-import type { ToolCall } from '../llm/types.js'
+import type { ToolCall } from '../../infra/llm/types.js'
 import { type ContextItemView, projectForChat, projectForLlm, projectForUser } from './projection.js'
 
 /**

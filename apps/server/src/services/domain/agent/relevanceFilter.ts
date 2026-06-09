@@ -1,6 +1,6 @@
 import { z } from 'zod'
-import type { RetrievedChunk } from '../../domain/retrieval.js'
-import type { ChatService, LlmCallStat } from '../llm/types.js'
+import type { RetrievedChunk } from '../retrieval.js'
+import type { ChatService, LlmCallStat } from '../../infra/llm/types.js'
 
 /**
  * RAG 抽取式相关性过滤（五期 §14.4 / DESIGN §8.1·2）：检索命中后、拼进生成上下文前，

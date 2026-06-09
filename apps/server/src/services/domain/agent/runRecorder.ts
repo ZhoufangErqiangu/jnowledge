@@ -5,7 +5,7 @@ import type {
   ContextItemRepo,
   ContextItemRow,
 } from '../../../models/contextItem.repo.js'
-import type { AgentEvent, LlmCallStat } from './types.js'
+import type { AgentEvent, LlmCallStat } from '../../infra/agent/index.js'
 
 /**
  * RunRecorder：把一次 run 产生的 AgentEvent 落成 context_items 的「写侧」收口。

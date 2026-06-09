@@ -13,7 +13,7 @@ import { createDocumentService, type DocumentService } from './services/domain/d
 import { createIngestionService, type IngestionService } from './services/domain/ingestion/index.js'
 import { createRetrievalService, type RetrievalService } from './services/domain/retrieval.js'
 import { createChatService, type ChatService } from './services/domain/chat.service.js'
-import { createAgentService, type AgentService } from './services/domain/agent.service.js'
+import { createAgentService, type AgentService } from './services/domain/agent/agent.service.js'
 import { createSearchService, type SearchService } from './services/domain/search.service.js'
 import { requireAuth } from './middleware/auth.js'
 import type { AppMiddleware } from './http/state.js'

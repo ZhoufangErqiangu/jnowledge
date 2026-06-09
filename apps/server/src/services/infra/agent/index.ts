@@ -1,29 +1,12 @@
 /**
- * Agent Runtime（infra）：通用 ReAct 循环 + 工具框架。是纯机制——
- * 工具的注册与具体能力的接线由 domain/agent.service 用其依赖（retrieval/models）完成，
- * 避免 infra 反向依赖 domain。
+ * Agent Runtime（infra 纯机制）：通用 ReAct 运行循环 + 工具/作用域契约。
+ * 只含「运行 agent」所需的机制——不依赖 models / domain。
+ *
+ * 调用方编排（上下文投影 projection、事件落库 runRecorder、system prompt 组装、
+ * 具体工具实现 tools/、agent-as-tool 委派）已上移到 `services/domain/agent/`：
+ * 那些依赖 models / domain service，属调用方职责，避免 infra 反向依赖。
  */
 export * from './types.js'
 export { Agent, type AgentConfig } from './agent.js'
 export { createToolRegistry, toToolSpec } from './registry.js'
-export { agentAsTool } from './agentAsTool.js'
-export { createRunRecorder, type RunRecorder } from './runRecorder.js'
 export { inCeiling, narrow, outOfScope } from './scope.js'
-export { createKnowledgeSearchTool } from './tools/knowledgeSearch.js'
-export { createGetDocumentTool } from './tools/getDocument.js'
-export { createListCollectionsTool } from './tools/listCollections.js'
-export { createMutationTools } from './tools/mutations.js'
-export {
-  createOperationAuditor,
-  type OperationAuditor,
-  type AuditVerdict,
-} from './operationAuditor.js'
-export { createRelevanceFilter, type RelevanceFilter } from './relevanceFilter.js'
-export { assembleSystemPrompt, buildScopeSuffix, type SystemFacts } from './systemPrompt.js'
-export {
-  type ContextItemView,
-  toContextItemView,
-  projectForLlm,
-  projectForChat,
-  projectForUser,
-} from './projection.js'

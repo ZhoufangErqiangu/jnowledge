@@ -1,6 +1,6 @@
 import { z } from 'zod'
-import type { CollectionService } from '../../../domain/collection.service.js'
-import type { Tool, ToolResult } from '../types.js'
+import type { CollectionService } from '../../collection.service.js'
+import type { Tool, ToolResult } from '../../../infra/agent/index.js'
 
 const paramsSchema = z.object({})
 
