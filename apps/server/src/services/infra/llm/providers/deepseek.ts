@@ -1,8 +1,8 @@
 import type { Thinking, ThinkingEffort } from '../types.js'
 import { normalizeThinking } from '../types.js'
-import { OpenAIChatProvider } from './openaiChat.js'
+import { OpenAIChatProvider } from './openai.js'
 
-export type { OpenAIChatConfig as DeepSeekConfig } from './openaiChat.js'
+export type { OpenAIChatConfig as DeepSeekConfig } from './openai.js'
 
 /**
  * DeepSeek chat 供应商。OpenAI 形状的全部 wire 机制继承自 OpenAIChatProvider；

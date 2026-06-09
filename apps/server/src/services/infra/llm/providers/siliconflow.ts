@@ -1,8 +1,8 @@
 import type { Embedder, Reranker, RerankHit, Thinking, ThinkingEffort } from '../types.js'
 import { LlmError, normalizeThinking } from '../types.js'
-import { type OpenAIChatConfig, OpenAIChatProvider } from './openaiChat.js'
+import { type OpenAIChatConfig, OpenAIChatProvider } from './openai.js'
 
-export type { OpenAIChatConfig as SiliconFlowConfig } from './openaiChat.js'
+export type { OpenAIChatConfig as SiliconFlowConfig } from './openai.js'
 
 function authHeaders(apiKey: string): Record<string, string> {
   return { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` }
