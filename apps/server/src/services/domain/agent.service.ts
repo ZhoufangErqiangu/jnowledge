@@ -5,6 +5,7 @@ import {
   type AgentDef,
   type LlmCallStat,
   type RunContext,
+  Agent,
   assembleSystemPrompt,
   buildScopeSuffix,
   createGetDocumentTool,
@@ -16,7 +17,6 @@ import {
   createRunRecorder,
   createToolRegistry,
   projectForLlm,
-  runAgent,
   toContextItemView,
 } from '../infra/agent/index.js'
 import type { Config } from '../../config/index.js'
@@ -213,7 +213,6 @@ export function createAgentService(deps: AgentDeps): AgentService {
         deadline: Date.now() + RUN_WALL_CLOCK_MS,
         charBudget: RUN_CHAR_BUDGET,
         signal: new AbortController().signal,
-        registry,
         llm,
         logger,
         citations,
@@ -254,17 +253,27 @@ export function createAgentService(deps: AgentDeps): AgentService {
           meta: { stage: 'scope', name: agentDef.name, summary: 'agent 作用域后缀快照' },
         })
       }
-      // 本轮 user 已落库 → 投影含本轮 user；runtime 不再自拼 [system, user]。
-      const initialMessages = projectForLlm([...priorItems, toContextItemView(userItem)], {
-        system,
+      // 本轮 user 已落库 → 投影含本轮 user；history 不含 system（由 Agent 构造期前置），
+      // scopeSuffix 仍由 projectForLlm 贴在最新 user 轮之前（保前缀缓存）。
+      const history = projectForLlm([...priorItems, toContextItemView(userItem)], {
         ...(scopeSuffix ? { scopeSuffix } : {}),
         budget: HISTORY_CHAR_BUDGET,
+      })
+      // agent 实例：身份 + 被授予工具子集 + 前轮对话构造期注入；运行环境经 run(ctx) 注入。
+      const agent = new Agent({
+        name: agentDef.name,
+        description: agentDef.description,
+        tier: agentDef.tier,
+        ...(agentDef.maxSteps !== undefined ? { maxSteps: agentDef.maxSteps } : {}),
+        system,
+        tools: registry.select(agentDef.toolNames),
+        history,
       })
 
       let answer = ''
       // 产出终答那次 LLM 调用的耗时/用量（final 事件携带），落到终答 assistant 条目 meta.llm。
       let finalLlm: LlmCallStat | undefined
-      for await (const ev of runAgent(agentDef, initialMessages, ctx)) {
+      for await (const ev of agent.run(ctx)) {
         switch (ev.type) {
           case 'assistant':
             // 中间 assistant 轮（发起了工具调用）：toolCalls + 本轮思考进 meta 供诊断/v2 重建。

@@ -2,17 +2,10 @@ import { z } from 'zod'
 import { uuidv7 } from 'uuidv7'
 import type { AgentRunRepo } from '../../../models/agentRun.repo.js'
 import type { ContextItemRepo } from '../../../models/contextItem.repo.js'
-import type { AgentTurnMessage } from '../llm/types.js'
-import { runAgent } from './runtime.js'
+import { Agent } from './agent.js'
 import { createRunRecorder } from './runRecorder.js'
 import { narrow } from './scope.js'
-import {
-  type AgentDef,
-  type RunContext,
-  type Tool,
-  type ToolResult,
-  MAX_AGENT_DEPTH,
-} from './types.js'
+import { type AgentDef, type RunContext, type Tool, type ToolResult, MAX_AGENT_DEPTH } from './types.js'
 
 const paramsSchema = z.object({
   task: z.string().min(1).describe('交给子 agent 完成的子任务描述（自包含、明确）'),
@@ -40,8 +33,11 @@ export interface AgentAsToolDeps {
  * 既留痕于 raw 视图与 run 树，又不污染 LLM/用户视图。
  *
  * 本期留作扩展点：尚未注册第二个 agent，组合根暂不接线（机制完整但 dormant）。
+ *
+ * `tools`=子 agent 被授予的工具子集（组合根经 ToolRegistry.select(def.toolNames) 解析后传入）——
+ * 构造期注入，与顶层 agent 同构（见 Agent/AgentConfig）。
  */
-export function agentAsTool(def: AgentDef, deps: AgentAsToolDeps): Tool {
+export function agentAsTool(def: AgentDef, tools: Tool[], deps: AgentAsToolDeps): Tool {
   const { contextItems, agentRuns } = deps
   return {
     name: def.name,
@@ -80,14 +76,20 @@ export function agentAsTool(def: AgentDef, deps: AgentAsToolDeps): Tool {
         runId: childRunId,
         state: 'internal',
       })
-      // 子 run 消息隔离：自拼 [system, task]，不见父 run 历史（避免污染跨轮记忆）。
-      const childMessages: AgentTurnMessage[] = [
-        { role: 'system', content: def.system },
-        { role: 'user', content: task },
-      ]
+      // 子 run 消息隔离：history 仅本轮 task（不见父 run 历史，避免污染跨轮记忆）；
+      // system 前缀由 Agent 构造期前置，等价于 [system, task]。
+      const childAgent = new Agent({
+        name: def.name,
+        description: def.description,
+        tier: def.tier,
+        ...(def.maxSteps !== undefined ? { maxSteps: def.maxSteps } : {}),
+        system: def.system,
+        tools,
+        history: [{ role: 'user', content: task }],
+      })
       let answer = ''
       try {
-        for await (const ev of runAgent(def, childMessages, childCtx)) {
+        for await (const ev of childAgent.run(childCtx)) {
           switch (ev.type) {
             case 'assistant':
               await recorder.assistant(ev)

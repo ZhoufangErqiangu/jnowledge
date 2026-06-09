@@ -4,8 +4,8 @@
  * 避免 infra 反向依赖 domain。
  */
 export * from './types.js'
-export { runAgent } from './runtime.js'
-export { createToolRegistry } from './registry.js'
+export { Agent, type AgentConfig } from './agent.js'
+export { createToolRegistry, toToolSpec } from './registry.js'
 export { agentAsTool } from './agentAsTool.js'
 export { createRunRecorder, type RunRecorder } from './runRecorder.js'
 export { inCeiling, narrow, outOfScope } from './scope.js'

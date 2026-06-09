@@ -1,7 +1,7 @@
 import type { z } from 'zod'
 import type { Citation, LlmTier } from '@jnowledge/shared'
 import type { Logger } from '../../../logger.js'
-import type { LLMClient, LlmCallStat, ToolCall, ToolSpec } from '../llm/types.js'
+import type { LLMClient, LlmCallStat, ToolCall } from '../llm/types.js'
 
 export type { LlmCallStat }
 
@@ -29,14 +29,20 @@ export interface Tool {
   handler: (args: unknown, ctx: RunContext) => Promise<ToolResult>
 }
 
-/** 唯一工具注册表（组合根构建）；agent 按 toolNames「授予」可见子集。 */
+/**
+ * 工具目录（catalog）：组合根用全集构建，仅在**构造期**用来按名取被授予子集。
+ * 不再进 RunContext、不进运行 loop——agent 构造时已被注入解析好的 Tool[]（见 Agent/AgentConfig）。
+ */
 export interface ToolRegistry {
   get(name: string): Tool | undefined
-  /** 把被授予的工具名转成喂给模型的 ToolSpec（含 JSON Schema 参数）。 */
-  specsFor(names: string[]): ToolSpec[]
+  /** 按被授予的工具名取子集（保序，未知名跳过）；交给 Agent 构造期注入。 */
+  select(names: string[]): Tool[]
 }
 
-/** 代码定义的 agent（本期不做 CRUD 实体）。 */
+/**
+ * 代码定义的 agent persona（本期不做 CRUD 实体）：声明「人设 + 被授予的工具名」。
+ * toolNames→Tool[] 的解析由组合根/domain 经 ToolRegistry.select 完成，再注入 Agent 构造。
+ */
 export interface AgentDef {
   name: string
   description: string
@@ -75,7 +81,6 @@ export interface RunContext {
   /** 近似 token 预算（按累计字符数估算）的字符上限。 */
   charBudget: number
   signal: AbortSignal
-  registry: ToolRegistry
   llm: LLMClient
   logger: Logger
   /** 全 run 共享的引用聚合器；工具向其追加并分配全局 marker。 */
