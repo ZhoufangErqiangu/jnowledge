@@ -124,11 +124,19 @@ export function createAgentService(deps: AgentDeps): AgentService {
     const persona = TopLevelAgent.persona
     try {
       // 全量历史（本轮提问入库前）——并据此判断是否首问。
-      const priorItems = (await models.contextItems.listByConversation(conversationId)).map(
-        toContextItemView,
-      )
+      const priorRows = await models.contextItems.listByConversation(conversationId)
+      const priorItems = priorRows.map(toContextItemView)
       if (priorItems.length === 0 && cv.title === '新会话') {
         await models.conversations.setTitle(conversationId, truncate(question, 30))
+      }
+      // 上次同 stage 的 system/scope 快照内容（rows 按 created_at 升序，末次命中即最新）——
+      // 用于「快照去重」：内容不变就不逐轮重复落同一份（见下方发送即快照处）。
+      let lastSystemSnapshot: string | undefined
+      let lastScopeSnapshot: string | undefined
+      for (const r of priorRows) {
+        const stage = r.meta?.stage
+        if (stage === 'system') lastSystemSnapshot = r.content
+        else if (stage === 'scope') lastScopeSnapshot = r.content
       }
 
       // run 先建（user 条目的 run_id 外键指向它），再落本轮 user 条目。
@@ -170,18 +178,22 @@ export function createAgentService(deps: AgentDeps): AgentService {
       // 易变可访问库列表走后缀（projectForLlm 插在历史之后、最新 user 轮之前），变化不动历史前缀。
       const system = assembleSystemPrompt(persona.system, facts)
       const scopeSuffix = buildScopeSuffix(facts)
-      // 发送即快照（§14.5）：把本 run 实际发给模型的 system 内容落 internal 条目（归属本 run）——
-      // 审计忠实、抗版本漂移，不靠事后重算。stage=system 为稳定前缀，stage=scope 为易变后缀。
-      await models.contextItems.insert({
-        id: uuidv7(),
-        conversationId,
-        runId,
-        kind: 'tool_result',
-        flags: { state: 'internal' },
-        content: system,
-        meta: { stage: 'system', name: persona.name, summary: 'agent system prompt 前缀快照' },
-      })
-      if (scopeSuffix) {
+      // 发送即快照（§14.5）：把本 run 实际发给模型的 system 内容落 internal 条目——审计忠实、抗版本漂移，
+      // 不靠事后重算。stage=system 为稳定前缀、stage=scope 为易变后缀。**去重（snapshot-on-change）**：
+      // 内容与上次同 stage 快照一致就跳过（system/scope 多轮通常不变，逐轮重复落只是噪声）；
+      // 重建第 N 轮实际 system = 取 created_at ≤ 该轮的最近一份快照（内容相同，无损）。
+      if (system !== lastSystemSnapshot) {
+        await models.contextItems.insert({
+          id: uuidv7(),
+          conversationId,
+          runId,
+          kind: 'tool_result',
+          flags: { state: 'internal' },
+          content: system,
+          meta: { stage: 'system', name: persona.name, summary: 'agent system prompt 前缀快照' },
+        })
+      }
+      if (scopeSuffix && scopeSuffix !== lastScopeSnapshot) {
         await models.contextItems.insert({
           id: uuidv7(),
           conversationId,
