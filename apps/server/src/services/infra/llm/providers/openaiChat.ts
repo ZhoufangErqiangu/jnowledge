@@ -12,6 +12,7 @@ import type {
   TextOptions,
   Thinking,
   ToolCall,
+  ToolSpec,
 } from '../types.js'
 import { LlmError } from '../types.js'
 
@@ -70,16 +71,18 @@ export abstract class OpenAIChatProvider implements LLMCapability {
     return res
   }
 
+  /**
+   * 四个能力方法共享的请求体骨架：model（opts 可覆盖默认）+ thinking 旋钮。
+   * sampling 参数（temperature/max_tokens）与各方法专属字段由调用处按需追加。
+   */
+  private commonBody(opts: { model?: string; thinking?: Thinking }): Record<string, unknown> {
+    return { model: opts.model ?? this.cfg.model, ...this.thinkingBody(opts) }
+  }
+
   async text(opts: TextOptions): Promise<string> {
     const startedAt = Date.now()
     const res = await this.rawChat(
-      {
-        model: opts.model ?? this.cfg.model,
-        messages: buildMessages(opts),
-        ...this.thinkingBody(opts),
-        ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
-        ...(opts.maxTokens !== undefined ? { max_tokens: opts.maxTokens } : {}),
-      },
+      { ...this.commonBody(opts), messages: buildMessages(opts), ...tempBody(opts), ...maxTokensBody(opts) },
       opts.timeoutMs,
     )
     const json = (await res.json()) as ChatCompletion
@@ -90,14 +93,7 @@ export abstract class OpenAIChatProvider implements LLMCapability {
 
   async *textStream(opts: TextOptions): AsyncIterable<StreamChunk> {
     const res = await this.rawChat(
-      {
-        model: opts.model ?? this.cfg.model,
-        messages: buildMessages(opts),
-        stream: true,
-        ...this.thinkingBody(opts),
-        ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
-        ...(opts.maxTokens !== undefined ? { max_tokens: opts.maxTokens } : {}),
-      },
+      { ...this.commonBody(opts), messages: buildMessages(opts), stream: true, ...tempBody(opts), ...maxTokensBody(opts) },
       opts.timeoutMs,
     )
     if (!res.body) throw new LlmError('流式响应无 body', 'provider')
@@ -107,87 +103,88 @@ export abstract class OpenAIChatProvider implements LLMCapability {
   async object<T>(schema: z.ZodType<T>, opts: ObjectOptions): Promise<T> {
     const jsonSchema = z.toJSONSchema(schema, { target: 'draft-7' })
     const schemaText = JSON.stringify(jsonSchema)
-    const maxRepair = opts.maxRepairAttempts ?? 2
     const baseMessages = buildMessages(opts)
-
-    let lastErr = ''
+    const maxRepair = opts.maxRepairAttempts ?? 2
     // 跨重试计时：耗时归到整次 object() 调用（含降级/修复重试，反映真实代价）。
     const startedAt = Date.now()
+
+    let lastErr = ''
     for (let attempt = 0; attempt <= maxRepair; attempt++) {
-      // 第 0 轮试原生 json_schema(strict)；其后用 json_object 并把 schema 文本注入 prompt
-      // （多数 OpenAI 兼容供应商不支持 json_schema strict，且 json_object 要求 prompt 含 schema 约束与 "json" 字样）。
-      const useStrict = attempt === 0
-      const messages = useStrict
-        ? baseMessages
-        : injectSchema(baseMessages, schemaText, attempt > 1 ? lastErr : undefined)
-
-      let res: Response
-      try {
-        res = await this.rawChat(
-          {
-            model: opts.model ?? this.cfg.model,
-            messages,
-            response_format: useStrict
-              ? { type: 'json_schema', json_schema: { name: 'result', schema: jsonSchema, strict: true } }
-              : { type: 'json_object' },
-            ...this.thinkingBody(opts),
-            ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
-          },
-          opts.timeoutMs,
-        )
-      } catch (err) {
-        // 超时不降级：换 response_format 无济于事，直接上抛（让调用方按 timeout 处理，如过滤的 fail-open）。
-        if (err instanceof LlmError && err.kind === 'timeout') throw err
-        // 供应商不支持 json_schema → 当轮立即降级到 json_object（注入 schema 文本）。
-        if (useStrict) {
-          res = await this.rawChat(
-            {
-              model: opts.model ?? this.cfg.model,
-              messages: injectSchema(baseMessages, schemaText),
-              response_format: { type: 'json_object' },
-              ...this.thinkingBody(opts),
-              ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
-            },
-            opts.timeoutMs,
-          )
-        } else {
-          throw err
-        }
+      const res = await this.requestStructured({ attempt, jsonSchema, schemaText, baseMessages, lastErr }, opts)
+      const outcome = await parseAndValidate(res, schema)
+      if (outcome.ok) {
+        emitStat(opts, startedAt, outcome.usage)
+        return outcome.data
       }
-
-      const json = (await res.json()) as ChatCompletion
-      const raw = json.choices[0]?.message?.content ?? ''
-      const parsed = safeJsonParse(raw)
-      if (parsed.ok) {
-        const result = schema.safeParse(parsed.value)
-        if (result.success) {
-          emitStat(opts, startedAt, json.usage)
-          return result.data
-        }
-        lastErr = result.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')
-      } else {
-        lastErr = '非合法 JSON'
-      }
+      lastErr = outcome.err
     }
     throw new LlmError(`结构化输出校验失败（已重试 ${maxRepair} 次）：${lastErr}`, 'validation')
+  }
+
+  /**
+   * 发一轮结构化请求并返回原始 Response（解析/校验交给 parseAndValidate）：
+   * - 第 0 轮：先试原生 json_schema(strict)；遇非超时错误（多数 OpenAI 兼容供应商不支持 strict）当轮降级 json_object。
+   * - 其后修复轮：直接 json_object（schema 文本注入 prompt，第 2 轮起回喂上次校验错误）。
+   * 超时不降级：换 response_format 无济于事，原样上抛（让调用方按 timeout 处理，如过滤的 fail-open）。
+   */
+  private async requestStructured(
+    ctx: { attempt: number; jsonSchema: unknown; schemaText: string; baseMessages: ChatMessage[]; lastErr: string },
+    opts: ObjectOptions,
+  ): Promise<Response> {
+    if (ctx.attempt > 0) {
+      return this.requestJsonObject(ctx.baseMessages, ctx.schemaText, ctx.attempt > 1 ? ctx.lastErr : undefined, opts)
+    }
+    try {
+      return await this.requestStrict(ctx.jsonSchema, ctx.baseMessages, opts)
+    } catch (err) {
+      if (err instanceof LlmError && err.kind === 'timeout') throw err
+      return this.requestJsonObject(ctx.baseMessages, ctx.schemaText, undefined, opts)
+    }
+  }
+
+  /** 原生 json_schema(strict) 请求；schema 直接作为 response_format 约束（不污染 prompt）。 */
+  private requestStrict(jsonSchema: unknown, messages: ChatMessage[], opts: ObjectOptions): Promise<Response> {
+    return this.rawChat(
+      {
+        ...this.commonBody(opts),
+        messages,
+        response_format: { type: 'json_schema', json_schema: { name: 'result', schema: jsonSchema, strict: true } },
+        ...tempBody(opts),
+      },
+      opts.timeoutMs,
+    )
+  }
+
+  /** json_object 降级请求；schema 文本注入 prompt（json_object 要求 prompt 含 schema 约束与 "json" 字样）。 */
+  private requestJsonObject(
+    baseMessages: ChatMessage[],
+    schemaText: string,
+    repairErr: string | undefined,
+    opts: ObjectOptions,
+  ): Promise<Response> {
+    return this.rawChat(
+      {
+        ...this.commonBody(opts),
+        messages: injectSchema(baseMessages, schemaText, repairErr),
+        response_format: { type: 'json_object' },
+        ...tempBody(opts),
+      },
+      opts.timeoutMs,
+    )
   }
 
   async *generateStream(opts: GenerateOptions): AsyncIterable<AgentChunk> {
     const res = await this.rawChat(
       {
-        model: this.cfg.model,
+        ...this.commonBody(opts),
         messages: toApiMessages(opts.messages),
-        tools: opts.tools.map((t) => ({
-          type: 'function',
-          function: { name: t.name, description: t.description, parameters: t.parameters },
-        })),
+        tools: toApiTools(opts.tools),
         tool_choice: 'auto',
         stream: true,
         // 流末附带 token 用量（OpenAI 形状：最后一个 choices=[] 的 chunk 带 usage）。供应商不支持则静默无此 chunk。
         stream_options: { include_usage: true },
-        ...this.thinkingBody(opts),
-        ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
-        ...(opts.maxTokens !== undefined ? { max_tokens: opts.maxTokens } : {}),
+        ...tempBody(opts),
+        ...maxTokensBody(opts),
       },
       opts.timeoutMs,
     )
@@ -228,6 +225,24 @@ function buildMessages(opts: TextOptions): ChatMessage[] {
   if (opts.system) msgs.push({ role: 'system', content: opts.system })
   if (opts.prompt) msgs.push({ role: 'user', content: opts.prompt })
   return msgs
+}
+
+/** temperature 的可选透传（仅在调用方传值时带上，否则随模型默认）。 */
+function tempBody(opts: { temperature?: number }): Record<string, unknown> {
+  return opts.temperature !== undefined ? { temperature: opts.temperature } : {}
+}
+
+/** max_tokens 的可选透传。object() 故意不带——避免截断 JSON 导致结构化输出不完整。 */
+function maxTokensBody(opts: { maxTokens?: number }): Record<string, unknown> {
+  return opts.maxTokens !== undefined ? { max_tokens: opts.maxTokens } : {}
+}
+
+/** ToolSpec[] → OpenAI function-calling 的 tools 形状。 */
+function toApiTools(tools: ToolSpec[]): Record<string, unknown>[] {
+  return tools.map((t) => ({
+    type: 'function',
+    function: { name: t.name, description: t.description, parameters: t.parameters },
+  }))
 }
 
 /** AgentTurnMessage[] → OpenAI chat messages 形状（含 assistant.tool_calls / tool 角色）。 */
@@ -279,6 +294,25 @@ interface ApiUsage {
   total_tokens?: number
   prompt_cache_hit_tokens?: number
   prompt_tokens_details?: { cached_tokens?: number }
+}
+
+/**
+ * 读取结构化响应 → 解析 JSON → zod 校验，归一成成功/失败判别联合（供 object() 重试循环消费）。
+ * 成功带回 usage（emitStat 用）；失败带回可读错误（回喂下一轮修复 prompt）。
+ */
+async function parseAndValidate<T>(
+  res: Response,
+  schema: z.ZodType<T>,
+): Promise<{ ok: true; data: T; usage?: ApiUsage } | { ok: false; err: string }> {
+  const json = (await res.json()) as ChatCompletion
+  const raw = json.choices[0]?.message?.content ?? ''
+  const parsed = safeJsonParse(raw)
+  if (!parsed.ok) return { ok: false, err: '非合法 JSON' }
+  const result = schema.safeParse(parsed.value)
+  if (!result.success) {
+    return { ok: false, err: result.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ') }
+  }
+  return { ok: true, data: result.data, ...(json.usage ? { usage: json.usage } : {}) }
 }
 
 function safeJsonParse(raw: string): { ok: true; value: unknown } | { ok: false } {
