@@ -9,7 +9,7 @@ import type { AgentEvent, LlmCallStat } from '../../infra/agent/index.js'
 
 /**
  * RunRecorder：把一次 run 产生的 AgentEvent 落成 context_items 的「写侧」收口。
- * 顶层 run（agent.service）与子 run（agentAsTool）共用同一套落库逻辑，仅 state 不同：
+ * 顶层 run（TopLevelAgent）与子 run（SubAgent）共用同一套落库逻辑（经 RecordedAgent），仅 state 不同：
  * - 顶层：state='active'，进 LLM/用户视图。
  * - 子 run：state='internal'，留痕于 raw 但不进任一视图（第三状态，DESIGN §8.3/§8.4）。
  *

@@ -1,22 +1,16 @@
 import { uuidv7 } from 'uuidv7'
-import { ERROR_CODES, type AgentStreamEvent, type Citation } from '@jnowledge/shared'
+import { ERROR_CODES, type AgentStreamEvent } from '@jnowledge/shared'
 import type { Models } from '../../../models/index.js'
-import {
-  type AgentDef,
-  type LlmCallStat,
-  type RunContext,
-  Agent,
-  createToolRegistry,
-} from '../../infra/agent/index.js'
+import { type RunContext, createToolRegistry } from '../../infra/agent/index.js'
 import { assembleSystemPrompt, buildScopeSuffix } from './systemPrompt.js'
 import { projectForLlm, toContextItemView } from './projection.js'
-import { createRunRecorder } from './runRecorder.js'
 import { createOperationAuditor } from './operationAuditor.js'
 import { createRelevanceFilter } from './relevanceFilter.js'
 import { createGetDocumentTool } from './tools/getDocument.js'
 import { createKnowledgeSearchTool } from './tools/knowledgeSearch.js'
 import { createListCollectionsTool } from './tools/listCollections.js'
 import { createMutationTools } from './tools/mutations.js'
+import { TopLevelAgent } from './agents/topLevelAgent.js'
 import type { Config } from '../../../config/index.js'
 import type { Infra } from '../../infra/index.js'
 import type { Logger } from '../../../logger.js'
@@ -40,53 +34,6 @@ export interface AgentService {
   ask(p: Principal, conversationId: string, question: string): AsyncIterable<AgentStreamEvent>
 }
 
-/** 增删改工具名（两个 agent 都授予；权限由服务层按 editor 校验）。 */
-const WRITE_TOOL_NAMES = [
-  'create_document',
-  'update_document',
-  'delete_document',
-  'move_document',
-  'create_collection',
-  'rename_collection',
-  'delete_collection',
-]
-
-/** 写能力 + 两阶段确认协议的系统提示（两个 agent 共用）。 */
-const WRITE_GUIDE = [
-  '你还可以增删改知识库内容（新建/修改/删除/移动文档，新建/重命名/删除知识库）。使用写工具时：',
-  '- 仅在用户明确要求改动时才动手；改动前先想清楚目标对象与范围。',
-  '- 若某次写调用返回「需用户确认」，必须把其中的计划与风险如实转述给用户并停下，不要继续执行；',
-  '  待用户在后续消息中明确同意后，再按回执指示的工具名与 confirmToken 重新调用执行。严禁自行确认。',
-  '  若回执提示操作已被「审计改写」，必须把改写后的实际操作如实说明给用户，再请其确认。',
-  '- 若某次写调用返回「被拒绝执行」（高危操作），不要尝试绕过或换法重试；如实告知用户该操作需其到管理界面手动完成。',
-  '- 若用户未同意或要求取消，则放弃该操作。',
-]
-
-/**
- * 唯一的智能助手 agent（不绑库）：作用域是 run 的属性而非 agent 身份——顶层恒为 principal
- * 全量可访问库，要限定某库由用户在对话中声明（选择器层），硬收窄只经 agentAsTool 委派产生。
- * 先 list_collections 选库，再带 collectionId 检索（可跨多库）。
- */
-const ASSISTANT: AgentDef = {
-  name: 'assistant',
-  description: '可跨知识库检索回答问题的智能助手',
-  system: [
-    '你是智能助手，可调用工具跨多个知识库检索来回答用户问题。',
-    '- 当问题需要依据知识库内容时：先调用 list_collections 查看可访问的知识库及其 id；',
-    '  再选定最相关的库，以其 id 调用 knowledge_search(query, collectionId) 检索；必要时对多个库分别检索。',
-    '- 若用户指明了某个/某些知识库，就只在其范围内检索；否则按问题相关性自行选库。',
-    '- 若检索片段不足，可用 get_document 查看某文档更多上下文；仍不足则如实说明「根据现有资料无法回答」，不要臆测。',
-    '- 回答时，凡引用了检索资料的句子，必须在句末用对应的 [序号] 标注来源（可多个，如 [1][3]）。',
-    '- 闲聊或无需知识库即可回答的问题，直接回答，不必检索。',
-    '- 写操作需指定目标库/文档 id（可先用 list_collections 或 knowledge_search 获取）。',
-    ...WRITE_GUIDE,
-    '- 用简洁的中文回答。',
-  ].join('\n'),
-  tier: 'standard',
-  toolNames: ['list_collections', 'knowledge_search', 'get_document', ...WRITE_TOOL_NAMES],
-  maxSteps: 12,
-}
-
 /** wall-clock 熔断（ms）。 */
 const RUN_WALL_CLOCK_MS = 120_000
 /** 近似 token 预算（按字符数估算）的字符上限。 */
@@ -94,6 +41,11 @@ const RUN_CHAR_BUDGET = 200_000
 /** 跨轮历史投影进 LLM 上下文的字符预算（留余量给本轮工具结果与生成）。 */
 const HISTORY_CHAR_BUDGET = 60_000
 
+/**
+ * AgentService：编排顶层一次问答的**数据准备 + 驱动**——ACL、落 run/user、装配工具与 system、
+ * 建 RunContext，然后交给 {@link TopLevelAgent} 跑 ReAct 并产 SSE。
+ * run 循环、落库、引用校验、run 生命周期收口都在 agent 子类里（见 agents/）。
+ */
 export function createAgentService(deps: AgentDeps): AgentService {
   const { config, models, infra, logger, collectionService, documentService, retrieval } = deps
   const { llm } = infra
@@ -119,11 +71,22 @@ export function createAgentService(deps: AgentDeps): AgentService {
     return cv
   }
 
-  /** 解析答案中的 [n] 标记，仅保留确有命中的引用，按 marker 升序。 */
-  function validateCitations(answer: string, citations: Citation[]): Citation[] {
-    const cited = new Set<number>()
-    for (const m of answer.matchAll(/\[(\d+)\]/g)) cited.add(Number(m[1]))
-    return citations.filter((c) => cited.has(c.marker)).sort((a, b) => a.marker - b.marker)
+  /** 唯一工具注册表（全集；agent 按 toolNames 授予子集）。 */
+  function buildToolRegistry() {
+    return createToolRegistry([
+      createKnowledgeSearchTool(retrieval, collectionService, relevanceFilter, models.contextItems),
+      createGetDocumentTool(models, collectionService),
+      createListCollectionsTool(collectionService),
+      ...createMutationTools({
+        documentService,
+        collectionService,
+        auditor,
+        pendingOps: models.pendingOperations,
+        contextItems: models.contextItems,
+        collections: models.collections,
+        documents: models.documents,
+      }),
+    ])
   }
 
   async function* ask(
@@ -140,14 +103,9 @@ export function createAgentService(deps: AgentDeps): AgentService {
     }
 
     const runId = uuidv7()
-    // 顶层 run 的落库收口（state=active，进 LLM/用户视图）；与子 run 共用同一套写逻辑。
-    const recorder = createRunRecorder(models.contextItems, {
-      conversationId,
-      runId,
-      state: 'active',
-    })
+    const persona = TopLevelAgent.persona
     try {
-      // 全量历史（本轮提问入库前）——投影成 LLM 上下文，并据此判断是否首问。
+      // 全量历史（本轮提问入库前）——并据此判断是否首问。
       const priorItems = (await models.contextItems.listByConversation(conversationId)).map(
         toContextItemView,
       )
@@ -155,16 +113,8 @@ export function createAgentService(deps: AgentDeps): AgentService {
         await models.conversations.setTitle(conversationId, truncate(question, 30))
       }
 
-      // 唯一 agent：顶层不绑库，作用域恒 principal（要限定某库由用户在对话中声明）。
-      const agentDef = ASSISTANT
-
       // run 先建（user 条目的 run_id 外键指向它），再落本轮 user 条目。
-      await models.agentRuns.insert({
-        id: runId,
-        conversationId,
-        agentName: agentDef.name,
-        input: question,
-      })
+      await models.agentRuns.insert({ id: runId, conversationId, agentName: persona.name, input: question })
       const userItem = await models.contextItems.insert({
         id: uuidv7(),
         conversationId,
@@ -173,36 +123,9 @@ export function createAgentService(deps: AgentDeps): AgentService {
         content: question,
       })
 
-      // 降级：未配置 chat 供应商 → 不进 ReAct。agent 不绑库、需模型自主选库检索，故仅提示。
-      if (!llm.chat.configured) {
-        const answer = '（未配置生成模型，助手需要生成模型才能选库检索）'
-        yield { type: 'token', delta: answer }
-        yield { type: 'citations', citations: [] }
-        const msg = await recorder.finalAssistant(answer, [])
-        await models.agentRuns.complete(runId, msg.id)
-        await models.conversations.touch(conversationId)
-        yield { type: 'done', messageId: msg.id, runId }
-        return
-      }
-
-      // 装配工具注册表（全集；agent 按 toolNames 授予子集）+ run 上下文。
-      const registry = createToolRegistry([
-        createKnowledgeSearchTool(retrieval, collectionService, relevanceFilter, models.contextItems),
-        createGetDocumentTool(models, collectionService),
-        createListCollectionsTool(collectionService),
-        ...createMutationTools({
-          documentService,
-          collectionService,
-          auditor,
-          pendingOps: models.pendingOperations,
-          contextItems: models.contextItems,
-          collections: models.collections,
-          documents: models.documents,
-        }),
-      ])
-      const citations: Citation[] = []
+      // 顶层 agent 不绑库：作用域恒 principal（实权由 assertRole 守）；硬收窄只经委派产生。
+      const registry = buildToolRegistry()
       const ctx: RunContext = {
-        // 顶层 agent 不绑库：作用域恒 principal（实权由 assertRole 守）；硬收窄只经 agentAsTool 委派。
         scope: { ceiling: 'principal' },
         principal: { uid: p.uid, role: p.role },
         conversationId,
@@ -213,7 +136,7 @@ export function createAgentService(deps: AgentDeps): AgentService {
         signal: new AbortController().signal,
         llm,
         logger,
-        citations,
+        citations: [],
       }
 
       // 可访问库：注入易变作用域后缀，模型直接用 id 检索、追问轮不臆造 collectionId（失败再 fallback）。
@@ -227,7 +150,7 @@ export function createAgentService(deps: AgentDeps): AgentService {
       }
       // 缓存友好分两路（DESIGN §8.2）：稳定前缀（顶层=纯模板）置消息序最前、长期可缓存；
       // 易变可访问库列表走后缀（projectForLlm 插在历史之后、最新 user 轮之前），变化不动历史前缀。
-      const system = assembleSystemPrompt(agentDef.system, facts)
+      const system = assembleSystemPrompt(persona.system, facts)
       const scopeSuffix = buildScopeSuffix(facts)
       // 发送即快照（§14.5）：把本 run 实际发给模型的 system 内容落 internal 条目（归属本 run）——
       // 审计忠实、抗版本漂移，不靠事后重算。stage=system 为稳定前缀，stage=scope 为易变后缀。
@@ -238,7 +161,7 @@ export function createAgentService(deps: AgentDeps): AgentService {
         kind: 'tool_result',
         flags: { state: 'internal' },
         content: system,
-        meta: { stage: 'system', name: agentDef.name, summary: 'agent system prompt 前缀快照' },
+        meta: { stage: 'system', name: persona.name, summary: 'agent system prompt 前缀快照' },
       })
       if (scopeSuffix) {
         await models.contextItems.insert({
@@ -248,7 +171,7 @@ export function createAgentService(deps: AgentDeps): AgentService {
           kind: 'tool_result',
           flags: { state: 'internal' },
           content: scopeSuffix,
-          meta: { stage: 'scope', name: agentDef.name, summary: 'agent 作用域后缀快照' },
+          meta: { stage: 'scope', name: persona.name, summary: 'agent 作用域后缀快照' },
         })
       }
       // 本轮 user 已落库 → 投影含本轮 user；history 不含 system（由 Agent 构造期前置），
@@ -257,65 +180,21 @@ export function createAgentService(deps: AgentDeps): AgentService {
         ...(scopeSuffix ? { scopeSuffix } : {}),
         budget: HISTORY_CHAR_BUDGET,
       })
-      // agent 实例：身份 + 被授予工具子集 + 前轮对话构造期注入；运行环境经 run(ctx) 注入。
-      const agent = new Agent({
-        name: agentDef.name,
-        description: agentDef.description,
-        tier: agentDef.tier,
-        ...(agentDef.maxSteps !== undefined ? { maxSteps: agentDef.maxSteps } : {}),
-        system,
-        tools: registry.select(agentDef.toolNames),
-        history,
-      })
 
-      let answer = ''
-      // 产出终答那次 LLM 调用的耗时/用量（final 事件携带），落到终答 assistant 条目 meta.llm。
-      let finalLlm: LlmCallStat | undefined
-      for await (const ev of agent.run(ctx)) {
-        switch (ev.type) {
-          case 'assistant':
-            // 中间 assistant 轮（发起了工具调用）：toolCalls + 本轮思考进 meta 供诊断/v2 重建。
-            await recorder.assistant(ev)
-            break
-          case 'reasoning':
-            recorder.addReasoning(ev.delta)
-            yield { type: 'reasoning', delta: ev.delta }
-            break
-          case 'text':
-            answer += ev.delta
-            yield { type: 'token', delta: ev.delta }
-            break
-          case 'step_start':
-            recorder.noteInput(ev.seq, ev.input)
-            yield { type: 'step_start', seq: ev.seq, kind: ev.kind, name: ev.name, input: ev.input }
-            break
-          case 'tool_result':
-            await recorder.toolResult(ev)
-            yield { type: 'tool_result', seq: ev.seq, ok: ev.ok, summary: ev.summary }
-            break
-          case 'final':
-            answer = ev.answer || answer
-            finalLlm = ev.llm
-            break
-          case 'error':
-            await models.agentRuns.fail(runId, ev.message)
-            yield { type: 'error', message: ev.message }
-            return
-        }
-      }
-
-      // 引用校验 + 落库终答 assistant 条目 + 完成 run。
-      const finalCitations = validateCitations(answer, citations)
-      yield { type: 'citations', citations: finalCitations }
-      const assistant = await recorder.finalAssistant(answer, finalCitations, finalLlm)
-      await models.agentRuns.complete(runId, assistant.id)
-      await models.conversations.touch(conversationId)
-      yield { type: 'done', messageId: assistant.id, runId }
+      // 顶层 agent：身份/工具/前轮对话构造期注入；run+落库+引用校验+生命周期收口都在 agent 内。
+      const agent = new TopLevelAgent(
+        { system, tools: registry.select(persona.toolNames), history },
+        {
+          contextItems: models.contextItems,
+          agentRuns: models.agentRuns,
+          conversations: models.conversations,
+          logger,
+        },
+      )
+      yield* agent.stream(ctx)
     } catch (err) {
-      logger.error({ conversationId, runId, err }, 'agent ask 失败')
-      await models.agentRuns
-        .fail(runId, err instanceof Error ? err.message : '运行失败')
-        .catch(() => {})
+      logger.error({ conversationId, runId, err }, 'agent ask 准备失败')
+      await models.agentRuns.fail(runId, err instanceof Error ? err.message : '运行失败').catch(() => {})
       yield { type: 'error', message: err instanceof Error ? err.message : '运行失败' }
     }
   }
