@@ -7,6 +7,12 @@ import { SubAgent, buildSubAgentTool } from './subAgent.js'
 
 const ragParamsSchema = z.object({
   query: z.string().min(1).describe('要在知识库中检索的查询（自然语言，自包含、尽量具体完整）'),
+  collectionIds: z
+    .array(z.string())
+    .optional()
+    .describe(
+      '限定检索的知识库 id 集合（取自可访问库列表 / list_collections）；省略则在你权限范围内自动选库。',
+    ),
 })
 
 /**
@@ -59,13 +65,19 @@ export class RagSearchAgent extends SubAgent {
         tier: persona.tier,
         paramsSchema: ragParamsSchema,
         make: (args) => {
-          const { query } = ragParamsSchema.parse(args)
+          const { query, collectionIds } = ragParamsSchema.parse(args)
+          // 限定库时把约束并入子任务文本（让子 agent 知情）+ 经 requestedScope 收窄其作用域天花板（强制）。
+          const task =
+            collectionIds && collectionIds.length > 0
+              ? `${query}\n\n（仅在以下知识库内检索：${collectionIds.join(' ')}）`
+              : query
           return {
             agent: new RagSearchAgent(
-              { tools: deps.tools, query },
+              { tools: deps.tools, query: task },
               { contextItems: deps.contextItems, agentRuns: deps.agentRuns },
             ),
-            task: query,
+            task,
+            ...(collectionIds && collectionIds.length > 0 ? { requestedScope: collectionIds } : {}),
           }
         },
       },

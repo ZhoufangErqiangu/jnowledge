@@ -22,8 +22,12 @@ const emit = defineEmits<{ cite: [citation: Citation] }>()
       <el-collapse v-if="steps.length" class="trace" :model-value="['t']">
         <el-collapse-item name="t" :title="`执行轨迹（${steps.length} 步）`">
           <div v-for="s in steps" :key="s.seq" class="trace-step">
-            <el-tag size="small" :type="s.running ? 'info' : s.ok ? 'success' : 'danger'">
-              {{ s.kind }}:{{ s.name }}
+            <el-tag
+              size="small"
+              :type="s.running ? 'info' : s.ok ? 'success' : 'danger'"
+              :effect="s.kind === 'agent' ? 'dark' : 'light'"
+            >
+              {{ s.kind === 'agent' ? '🤖 子agent' : '🔧 工具' }}:{{ s.name }}
             </el-tag>
             <span class="trace-summary">{{ s.running ? '执行中…' : s.summary }}</span>
           </div>

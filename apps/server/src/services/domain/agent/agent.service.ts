@@ -11,6 +11,7 @@ import { createKnowledgeSearchTool } from './tools/knowledgeSearch.js'
 import { createListCollectionsTool } from './tools/listCollections.js'
 import { createMutationTools } from './tools/mutations.js'
 import { TopLevelAgent } from './agents/topLevelAgent.js'
+import { RagSearchAgent } from './agents/ragSearchAgent.js'
 import type { Config } from '../../../config/index.js'
 import type { Infra } from '../../infra/index.js'
 import type { Logger } from '../../../logger.js'
@@ -71,12 +72,29 @@ export function createAgentService(deps: AgentDeps): AgentService {
     return cv
   }
 
-  /** 唯一工具注册表（全集；agent 按 toolNames 授予子集）。 */
+  /**
+   * 工具注册表（顶层授予集）。检索经 rag_search 子 agent 委派：knowledge_search 只活在子 agent 内部、
+   * **不授予顶层**；顶层见到的是 rag_search（kind='agent'，调它即切到检索子上下文）+ 读/写/列举工具。
+   */
   function buildToolRegistry() {
+    const knowledgeSearch = createKnowledgeSearchTool(
+      retrieval,
+      collectionService,
+      relevanceFilter,
+      models.contextItems,
+    )
+    const getDocument = createGetDocumentTool(models, collectionService)
+    const listCollections = createListCollectionsTool(collectionService)
+    // rag_search 子 agent 被授予的检索三件套（构造期注入到每个子 run 实例）。
+    const ragSearch = RagSearchAgent.tool({
+      tools: [listCollections, knowledgeSearch, getDocument],
+      contextItems: models.contextItems,
+      agentRuns: models.agentRuns,
+    })
     return createToolRegistry([
-      createKnowledgeSearchTool(retrieval, collectionService, relevanceFilter, models.contextItems),
-      createGetDocumentTool(models, collectionService),
-      createListCollectionsTool(collectionService),
+      listCollections,
+      ragSearch,
+      getDocument,
       ...createMutationTools({
         documentService,
         collectionService,

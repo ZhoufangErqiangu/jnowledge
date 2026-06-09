@@ -26,6 +26,11 @@ export interface Tool {
   description: string
   paramsSchema: z.ZodType
   tier?: LlmTier
+  /**
+   * 轨迹类别（缺省 'tool'）：被当作工具调用的子 agent 标 'agent'（见 buildSubAgentTool），
+   * 使 step_start/tool_result 事件能区分「调工具」与「切到子 agent 上下文」，前端/调试页据此呈现。
+   */
+  kind?: 'tool' | 'agent'
   handler: (args: unknown, ctx: RunContext) => Promise<ToolResult>
 }
 

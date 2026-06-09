@@ -156,9 +156,12 @@ export class Agent {
     seq: number,
     ctx: RunContext,
   ): AsyncGenerator<AgentEvent, void> {
-    yield { type: 'step_start', seq, kind: 'tool', name: call.name, input: call.arguments }
-
     const tool = this.toolsByName.get(call.name)
+    // 轨迹类别：普通工具='tool'；被当作工具调用的子 agent（buildSubAgentTool 标 kind='agent'）='agent'，
+    // 让前端轨迹/调试页区分「调工具」与「切到子 agent 上下文」。未知工具按 'tool' 呈现。
+    const kind = tool?.kind ?? 'tool'
+    yield { type: 'step_start', seq, kind, name: call.name, input: call.arguments }
+
     // 未授予 / 未知工具：回喂错误让模型纠正，不中断 run。
     if (!tool) {
       const msg = `未知或未授予的工具：${call.name}`
@@ -166,7 +169,7 @@ export class Agent {
       yield {
         type: 'tool_result',
         seq,
-        kind: 'tool',
+        kind,
         name: call.name,
         toolCallId: call.id,
         ok: false,
@@ -185,7 +188,7 @@ export class Agent {
       yield {
         type: 'tool_result',
         seq,
-        kind: 'tool',
+        kind,
         name: call.name,
         toolCallId: call.id,
         ok: false,
@@ -205,7 +208,7 @@ export class Agent {
       yield {
         type: 'tool_result',
         seq,
-        kind: 'tool',
+        kind,
         name: call.name,
         toolCallId: call.id,
         ok: result.ok,
@@ -220,7 +223,7 @@ export class Agent {
       yield {
         type: 'tool_result',
         seq,
-        kind: 'tool',
+        kind,
         name: call.name,
         toolCallId: call.id,
         ok: false,

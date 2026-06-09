@@ -58,6 +58,7 @@ export function buildSubAgentTool(spec: SubAgentToolSpec, deps: { agentRuns: Age
     name: spec.name,
     description: spec.description,
     paramsSchema: spec.paramsSchema,
+    kind: 'agent',
     ...(spec.tier ? { tier: spec.tier } : {}),
     handler: async (args, ctx): Promise<ToolResult> => {
       if (ctx.depth >= MAX_AGENT_DEPTH) {
