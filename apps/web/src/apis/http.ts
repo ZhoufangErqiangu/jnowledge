@@ -3,6 +3,9 @@ import type { ErrorResponse } from '@jnowledge/shared'
 
 export const TOKEN_KEY = 'jnowledge.token'
 
+/** 后端地址：由环境变量注入（开发固定本地后端），缺省回退同源。 */
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? ''
+
 /** 规范化的接口错误，组件可据 code 分支处理。 */
 export class ApiError extends Error {
   constructor(
@@ -15,7 +18,7 @@ export class ApiError extends Error {
   }
 }
 
-export const http = axios.create({ baseURL: '/' })
+export const http = axios.create({ baseURL: API_BASE_URL || '/' })
 
 // 请求拦截：注入 Bearer token
 http.interceptors.request.use((config) => {

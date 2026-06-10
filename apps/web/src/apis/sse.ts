@@ -1,4 +1,4 @@
-import { ApiError, TOKEN_KEY } from './http'
+import { API_BASE_URL, ApiError, TOKEN_KEY } from './http'
 
 /**
  * 通用 SSE POST 读流：用 fetch 增量读取（axios 不便于流式），逐个 `data: <json>` 事件回调 onEvent。
@@ -11,7 +11,7 @@ export async function streamSSE<T>(
   signal?: AbortSignal,
 ): Promise<void> {
   const token = localStorage.getItem(TOKEN_KEY)
-  const res = await fetch(url, {
+  const res = await fetch(`${API_BASE_URL}${url}`, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',

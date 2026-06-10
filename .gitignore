@@ -4,6 +4,7 @@ dist/
 .env
 .env.*
 !.env.example
+!apps/web/.env.development
 .DS_Store
 coverage/
 *.tsbuildinfo
