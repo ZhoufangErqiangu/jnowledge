@@ -4,6 +4,9 @@
 # syntax=docker/dockerfile:1
 FROM node:24-slim AS build
 ENV PNPM_HOME=/pnpm PATH=/pnpm:$PATH
+# 后端基址：vite build 时烘焙进静态产物（缺省空 = 同源，交上游网关反代）。
+ARG VITE_API_BASE_URL=""
+ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 RUN corepack enable
 WORKDIR /app
 COPY . .

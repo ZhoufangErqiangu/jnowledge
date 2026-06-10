@@ -83,6 +83,9 @@ services:
     build:
       context: .
       dockerfile: apps/web/Dockerfile
+      args:
+        # 后端基址烘焙进 SPA；缺省空 = 同源（API 由上游网关反代）。
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
     image: jnowledge-web:latest
     restart: unless-stopped
     ports:
