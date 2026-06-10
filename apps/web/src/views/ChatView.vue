@@ -53,15 +53,7 @@ async function send() {
     <div
       class="flex flex-col h-full rounded-xl border border-white/[0.06] bg-surface/60 overflow-hidden"
     >
-      <div v-if="chat.currentId" class="flex justify-end px-4 py-2 border-b border-white/[0.05] shrink-0">
-        <router-link
-          :to="{ name: 'context-debug', params: { id: chat.currentId } }"
-          class="text-xs text-white/30 hover:text-white/50 transition-colors"
-        >
-          调试上下文
-        </router-link>
-      </div>
-      <div class="flex-1 flex flex-col px-4 pb-4 overflow-hidden">
+      <div class="flex-1 flex flex-col px-4 py-4 overflow-hidden">
         <MessageList
           :messages="chat.messages"
           :streaming="chat.streaming"
@@ -76,6 +68,7 @@ async function send() {
           v-model:tier="chat.tier"
           v-model:thinking="chat.thinking"
           :streaming="chat.streaming"
+          :conversation-id="chat.currentId"
           @send="send"
         />
       </div>

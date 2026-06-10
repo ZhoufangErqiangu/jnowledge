@@ -11,7 +11,7 @@ import SelectItem from '@/components/ui/SelectItem.vue'
 const text = defineModel<string>('modelValue', { required: true })
 const tier = defineModel<MainReasoningTier>('tier', { required: true })
 const thinking = defineModel<boolean>('thinking', { required: true })
-defineProps<{ streaming: boolean }>()
+defineProps<{ streaming: boolean; conversationId?: string | null }>()
 const emit = defineEmits<{ send: [] }>()
 
 // 主推理档位的中文标签（仅暴露 heavy/standard/light）。
@@ -59,6 +59,13 @@ watch(text, () => nextTick(autogrow), { immediate: true })
         <Brain :size="13" />
         思考
       </button>
+      <router-link
+        v-if="conversationId"
+        :to="{ name: 'context-debug', params: { id: conversationId } }"
+        class="ml-auto text-xs text-white/30 hover:text-white/50 transition-colors"
+      >
+        调试上下文
+      </router-link>
     </div>
 
     <div
