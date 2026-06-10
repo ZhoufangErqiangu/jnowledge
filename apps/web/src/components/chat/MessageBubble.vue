@@ -4,51 +4,51 @@ import MarkdownContent from '@/components/MarkdownContent.vue'
 import CitationTags from '@/components/chat/CitationTags.vue'
 import ReasoningPanel from '@/components/chat/ReasoningPanel.vue'
 import { formatDate } from '@/utils/format'
+import { cn } from '@/lib/utils'
 
-// 单条已落库消息：用户消息纯文本，助手消息按 Markdown 渲染并带引用。
 defineProps<{ message: Message }>()
 const emit = defineEmits<{ cite: [citation: Citation] }>()
 </script>
 
 <template>
-  <div class="msg" :class="message.role">
-    <div class="bubble">
+  <div :class="cn('flex mb-5 animate-fade-up', message.role === 'user' && 'justify-end')">
+    <!-- AI avatar -->
+    <div
+      v-if="message.role === 'assistant'"
+      class="w-7 h-7 rounded-full bg-gradient-to-br from-brand to-brand-violet flex items-center justify-center text-white text-xs font-bold shrink-0 mr-2 mt-0.5 shadow-lg shadow-brand/30"
+    >
+      K
+    </div>
+
+    <div
+      :class="
+        cn(
+          'max-w-[76%] rounded-2xl px-4 py-3',
+          message.role === 'user'
+            ? 'bg-gradient-to-br from-brand to-brand-violet text-white rounded-br-sm shadow-lg shadow-brand/20'
+            : 'bg-surface border border-white/[0.07] text-white/90 rounded-bl-sm shadow-md',
+        )
+      "
+    >
       <ReasoningPanel
         v-if="message.role === 'assistant' && message.reasoning"
         :reasoning="message.reasoning"
       />
       <MarkdownContent v-if="message.role === 'assistant'" :source="message.content" />
-      <div v-else class="content">{{ message.content }}</div>
+      <div v-else class="whitespace-pre-wrap break-words leading-relaxed text-sm">
+        {{ message.content }}
+      </div>
       <CitationTags :citations="message.citations" @select="emit('cite', $event)" />
-      <div class="ts page-muted">{{ formatDate(message.createdAt) }}</div>
+      <div
+        :class="
+          cn(
+            'text-[10px] mt-2',
+            message.role === 'user' ? 'text-white/60' : 'text-white/30',
+          )
+        "
+      >
+        {{ formatDate(message.createdAt) }}
+      </div>
     </div>
   </div>
 </template>
-
-<style scoped lang="less">
-.msg {
-  display: flex;
-  margin-bottom: 14px;
-}
-.msg.user {
-  justify-content: flex-end;
-}
-.bubble {
-  max-width: 76%;
-  padding: 10px 14px;
-  border-radius: 10px;
-  background: var(--el-fill-color-light);
-}
-.msg.user .bubble {
-  background: var(--el-color-primary-light-9);
-}
-.content {
-  white-space: pre-wrap;
-  word-break: break-word;
-  line-height: 1.6;
-}
-.ts {
-  font-size: 11px;
-  margin-top: 6px;
-}
-</style>

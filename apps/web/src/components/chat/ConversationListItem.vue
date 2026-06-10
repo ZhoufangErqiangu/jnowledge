@@ -1,36 +1,29 @@
 <script setup lang="ts">
 import type { Conversation } from '@jnowledge/shared'
+import { Trash2 } from 'lucide-vue-next'
+import { cn } from '@/lib/utils'
 
-// 单条会话项：把 v-for 里的标记与交互收口为独立组件，列表只负责遍历。
 defineProps<{ conversation: Conversation; active: boolean }>()
 const emit = defineEmits<{ select: []; remove: [] }>()
 </script>
 
 <template>
-  <li :class="{ active }" @click="emit('select')">
-    <span class="cv-title">{{ conversation.title }}</span>
-    <el-button text size="small" type="danger" @click.stop="emit('remove')">删</el-button>
+  <li
+    :class="
+      cn(
+        'flex items-center justify-between px-3 py-2 rounded-lg cursor-pointer group',
+        'transition-all duration-100',
+        active ? 'bg-brand/20 text-white' : 'text-white/70 hover:bg-white/[0.05] hover:text-white',
+      )
+    "
+    @click="emit('select')"
+  >
+    <span class="truncate text-sm flex-1">{{ conversation.title }}</span>
+    <button
+      class="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-red-500/20 hover:text-red-400 text-white/40 shrink-0"
+      @click.stop="emit('remove')"
+    >
+      <Trash2 :size="13" />
+    </button>
   </li>
 </template>
-
-<style scoped lang="less">
-li {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 10px;
-  border-radius: 6px;
-  cursor: pointer;
-}
-li:hover {
-  background: var(--el-fill-color-light);
-}
-li.active {
-  background: var(--el-color-primary-light-9);
-}
-.cv-title {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-</style>

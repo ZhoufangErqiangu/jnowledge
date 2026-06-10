@@ -1,14 +1,20 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { ArrowLeft } from 'lucide-vue-next'
 import { useDocumentsStore } from '@/stores/documents'
 import { useApiAction } from '@/hooks/useApiAction'
 import { useCitationHighlight } from '@/hooks/useCitationHighlight'
-import { statusTagType } from '@/utils/format'
 import DocumentEditor from '@/components/documents/DocumentEditor.vue'
 import VersionHistory from '@/components/documents/VersionHistory.vue'
 import DocumentSource from '@/components/documents/DocumentSource.vue'
 import ChunkList from '@/components/documents/ChunkList.vue'
+import StatusBadge from '@/components/ui/StatusBadge.vue'
+import Button from '@/components/ui/Button.vue'
+import Tabs from '@/components/ui/Tabs.vue'
+import TabsList from '@/components/ui/TabsList.vue'
+import TabsTrigger from '@/components/ui/TabsTrigger.vue'
+import TabsContent from '@/components/ui/TabsContent.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -21,7 +27,6 @@ const editTitle = ref('')
 const editContent = ref('')
 const saving = ref(false)
 
-// 原文标签的引用高亮（按 route.query.hl 的精确 char 偏移切分当前版本全文）。
 const { sourceParts } = useCitationHighlight(() => docs.viewingVersion?.content)
 const viewingVersionNo = computed(() => docs.viewingVersion?.versionNo ?? null)
 const sourceRef = ref<InstanceType<typeof DocumentSource> | null>(null)
@@ -56,7 +61,6 @@ async function save() {
 
 onMounted(async () => {
   await loadAll()
-  // 从引用跳转进入：定位到指定版本并切到「原文」高亮。
   const v = route.query.version as string | undefined
   if (v) {
     await run(() => docs.loadVersionChunks(id, v), '加载失败')
@@ -67,52 +71,41 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div v-if="docs.detail" class="detail">
-    <div class="head">
-      <el-button text @click="router.back()">← 返回</el-button>
-      <h2 class="title">{{ docs.detail.document.title }}</h2>
-      <el-tag :type="statusTagType(docs.detail.document.status)">
-        {{ docs.detail.document.status }}
-      </el-tag>
-      <span class="page-muted">{{ docs.detail.chunkCount }} 个分块</span>
+  <div v-if="docs.detail" class="max-w-[980px] mx-auto">
+    <div class="flex items-center gap-3 mb-4">
+      <Button variant="ghost" size="sm" class="gap-1.5" @click="router.back()">
+        <ArrowLeft :size="14" />返回
+      </Button>
+      <h2 class="text-lg font-semibold text-white/90 flex-1 truncate m-0">
+        {{ docs.detail.document.title }}
+      </h2>
+      <StatusBadge :status="docs.detail.document.status" />
+      <span class="text-xs text-white/40">{{ docs.detail.chunkCount }} 个分块</span>
     </div>
-    <p v-if="docs.detail.document.statusError" class="err">⚠ {{ docs.detail.document.statusError }}</p>
+    <p v-if="docs.detail.document.statusError" class="text-sm text-red-400 mb-3">
+      ⚠ {{ docs.detail.document.statusError }}
+    </p>
 
-    <el-tabs v-model="activeTab">
-      <el-tab-pane label="编辑" name="edit">
+    <Tabs v-model="activeTab">
+      <TabsList>
+        <TabsTrigger value="edit">编辑</TabsTrigger>
+        <TabsTrigger value="versions">版本历史</TabsTrigger>
+        <TabsTrigger value="source">原文</TabsTrigger>
+        <TabsTrigger value="chunks">分块 ({{ docs.chunks.length }})</TabsTrigger>
+      </TabsList>
+
+      <TabsContent value="edit">
         <DocumentEditor v-model:title="editTitle" v-model:content="editContent" :saving="saving" @save="save" />
-      </el-tab-pane>
-
-      <el-tab-pane label="版本历史" name="versions">
+      </TabsContent>
+      <TabsContent value="versions">
         <VersionHistory :versions="docs.versions" @select="selectVersion" />
-      </el-tab-pane>
-
-      <el-tab-pane label="原文" name="source">
+      </TabsContent>
+      <TabsContent value="source">
         <DocumentSource ref="sourceRef" :parts="sourceParts" :version-no="viewingVersionNo" />
-      </el-tab-pane>
-
-      <el-tab-pane :label="`分块 (${docs.chunks.length})`" name="chunks">
+      </TabsContent>
+      <TabsContent value="chunks">
         <ChunkList :chunks="docs.chunks" :version-no="viewingVersionNo" />
-      </el-tab-pane>
-    </el-tabs>
+      </TabsContent>
+    </Tabs>
   </div>
 </template>
-
-<style scoped lang="less">
-.detail {
-  max-width: 980px;
-  margin: 0 auto;
-}
-.head {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.title {
-  margin: 0;
-  flex: 0 1 auto;
-}
-.err {
-  color: #f56c6c;
-}
-</style>

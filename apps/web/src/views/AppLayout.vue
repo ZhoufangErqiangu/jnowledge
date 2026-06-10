@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onMounted } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import ThemeToggle from '@/components/ThemeToggle.vue'
+import Button from '@/components/ui/Button.vue'
 
 const router = useRouter()
+const route = useRoute()
 const auth = useAuthStore()
 
 onMounted(() => {
@@ -15,46 +16,57 @@ function logout() {
   auth.logout()
   router.push('/login')
 }
+
+const navLinks = [
+  { label: '知识库', to: '/collections' },
+  { label: '搜索', to: '/search' },
+  { label: '全局助手', to: '/chat' },
+]
+
+function isActive(path: string) {
+  return route.path.startsWith(path)
+}
 </script>
 
 <template>
-  <el-container class="layout">
-    <el-header class="header">
-      <div class="brand" @click="router.push('/collections')">📚 jnowledge</div>
-      <el-button text @click="router.push('/collections')">知识库</el-button>
-      <el-button text @click="router.push('/search')">搜索</el-button>
-      <el-button text @click="router.push('/chat')">全局助手</el-button>
-      <div class="spacer" />
-      <ThemeToggle />
-      <span class="page-muted">{{ auth.user?.displayName || auth.user?.email }}</span>
-      <el-button text type="primary" @click="logout">退出</el-button>
-    </el-header>
-    <el-main class="main">
-      <router-view />
-    </el-main>
-  </el-container>
-</template>
+  <div class="flex flex-col h-screen bg-base overflow-hidden">
+    <!-- Glassmorphism sticky header -->
+    <header
+      class="sticky top-0 z-50 flex items-center h-14 px-5 gap-3 shrink-0 border-b border-white/[0.06] bg-surface-dark/80 backdrop-blur-xl shadow-[0_1px_0_rgba(99,102,241,0.08)]"
+    >
+      <button
+        class="font-bold text-white/90 hover:text-white transition-colors mr-1 flex items-center gap-1.5 text-sm"
+        @click="router.push('/collections')"
+      >
+        📚 jnowledge
+      </button>
 
-<style scoped lang="less">
-.layout {
-  height: 100%;
-}
-.header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  border-bottom: 1px solid var(--el-border-color);
-  background: var(--el-bg-color);
-}
-.brand {
-  font-weight: 600;
-  cursor: pointer;
-}
-.spacer {
-  flex: 1;
-}
-.main {
-  background: var(--el-bg-color-page);
-  padding: 16px;
-}
-</style>
+      <div class="flex items-center gap-0.5">
+        <button
+          v-for="link in navLinks"
+          :key="link.to"
+          :class="[
+            'px-3 py-1.5 rounded-md text-sm transition-all duration-150',
+            isActive(link.to)
+              ? 'text-brand bg-brand/10'
+              : 'text-white/60 hover:text-white/90 hover:bg-white/[0.05]',
+          ]"
+          @click="router.push(link.to)"
+        >
+          {{ link.label }}
+        </button>
+      </div>
+
+      <div class="flex-1" />
+
+      <span class="text-sm text-white/40 hidden sm:block">
+        {{ auth.user?.displayName || auth.user?.email }}
+      </span>
+      <Button variant="ghost" size="sm" @click="logout">退出</Button>
+    </header>
+
+    <main class="flex-1 overflow-auto p-4">
+      <router-view />
+    </main>
+  </div>
+</template>

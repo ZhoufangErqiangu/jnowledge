@@ -1,18 +1,19 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { Search } from 'lucide-vue-next'
 import type { SearchHit } from '@jnowledge/shared'
 import { searchApi } from '@/apis/search'
 import { useApiAction } from '@/hooks/useApiAction'
+import Button from '@/components/ui/Button.vue'
+import Badge from '@/components/ui/Badge.vue'
 
-// 全局检索：纯相关性排序的文档列表，无 LLM 推理（无会话、无生成、无引用标注）。
 const router = useRouter()
 const { run } = useApiAction()
 
 const query = ref('')
 const hits = ref<SearchHit[]>([])
 const loading = ref(false)
-// 已执行过一次检索（用于区分「初始态」与「无结果」）。
 const searched = ref(false)
 
 async function search() {
@@ -33,92 +34,59 @@ function open(hit: SearchHit) {
 </script>
 
 <template>
-  <el-card class="search" shadow="never">
-    <div class="search-bar">
-      <el-input
-        v-model="query"
-        placeholder="跨知识库检索文档（按相关性排序，不经 AI 生成）"
-        clearable
-        @keydown.enter.prevent="search"
-      >
-        <template #append>
-          <el-button :loading="loading" @click="search">搜索</el-button>
-        </template>
-      </el-input>
+  <div class="h-full overflow-y-auto">
+    <!-- Search bar -->
+    <div class="max-w-[720px] mx-auto mt-2 mb-6">
+      <div class="flex gap-2">
+        <div class="flex-1 relative">
+          <Search
+            :size="15"
+            class="absolute left-3 top-1/2 -translate-y-1/2 text-white/30 pointer-events-none"
+          />
+          <input
+            v-model="query"
+            placeholder="跨知识库检索文档（按相关性排序，不经 AI 生成）"
+            class="w-full h-9 pl-9 pr-3 rounded-md border border-white/[0.1] bg-white/[0.04] text-sm text-white/90 placeholder:text-white/30 focus:outline-none focus:ring-1 focus:ring-brand/50 focus:border-brand/40 transition-all duration-150"
+            @keydown.enter.prevent="search"
+          />
+        </div>
+        <Button :loading="loading" @click="search">搜索</Button>
+      </div>
     </div>
 
-    <ul v-if="hits.length > 0" class="hit-list">
-      <li v-for="hit in hits" :key="hit.documentId" class="hit" @click="open(hit)">
-        <div class="hit-head">
-          <span class="hit-title">{{ hit.documentTitle }}</span>
-          <el-tag size="small" effect="plain" type="info">{{ hit.collectionName }}</el-tag>
-          <span v-if="hit.hitCount > 1" class="hit-count">{{ hit.hitCount }} 处命中</span>
+    <!-- Results -->
+    <ul v-if="hits.length > 0" class="max-w-[720px] mx-auto space-y-2">
+      <li
+        v-for="hit in hits"
+        :key="hit.documentId"
+        class="p-4 rounded-xl border border-white/[0.07] bg-surface/50 cursor-pointer hover:border-brand/30 hover:shadow-[0_0_0_1px_rgba(99,102,241,0.1)] hover:bg-surface/80 transition-all duration-150"
+        @click="open(hit)"
+      >
+        <div class="flex items-center gap-2 mb-1">
+          <span class="font-semibold text-white/90 text-sm">{{ hit.documentTitle }}</span>
+          <Badge>{{ hit.collectionName }}</Badge>
+          <span v-if="hit.hitCount > 1" class="text-xs text-white/40">{{ hit.hitCount }} 处命中</span>
         </div>
-        <div v-if="hit.headingPath.length" class="hit-path">{{ hit.headingPath.join(' › ') }}</div>
-        <div class="hit-snippet">{{ hit.snippet }}</div>
+        <div v-if="hit.headingPath.length" class="text-xs text-white/40 mb-1">
+          {{ hit.headingPath.join(' › ') }}
+        </div>
+        <div class="text-sm text-white/60 leading-relaxed">{{ hit.snippet }}</div>
       </li>
     </ul>
 
-    <el-empty
+    <div
       v-else-if="searched && !loading"
-      description="未检索到相关文档"
-      :image-size="80"
-    />
-    <el-empty
+      class="flex flex-col items-center justify-center py-16 gap-2 text-white/30"
+    >
+      <Search :size="32" class="opacity-30" />
+      <span class="text-sm">未检索到相关文档</span>
+    </div>
+    <div
       v-else-if="!searched"
-      description="输入关键词，跨你有权访问的知识库检索文档"
-      :image-size="80"
-    />
-  </el-card>
+      class="flex flex-col items-center justify-center py-16 gap-2 text-white/30"
+    >
+      <Search :size="32" class="opacity-30" />
+      <span class="text-sm">输入关键词，跨你有权访问的知识库检索文档</span>
+    </div>
+  </div>
 </template>
-
-<style scoped lang="less">
-.search {
-  height: 100%;
-  overflow-y: auto;
-}
-.search-bar {
-  max-width: 720px;
-  margin: 8px auto 20px;
-}
-.hit-list {
-  list-style: none;
-  margin: 0 auto;
-  padding: 0;
-  max-width: 720px;
-}
-.hit {
-  padding: 12px 14px;
-  border: 1px solid var(--el-border-color);
-  border-radius: 8px;
-  margin-bottom: 10px;
-  cursor: pointer;
-  transition: border-color 0.15s;
-}
-.hit:hover {
-  border-color: var(--el-color-primary);
-}
-.hit-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.hit-title {
-  font-weight: 600;
-}
-.hit-count {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-}
-.hit-path {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-  margin-top: 4px;
-}
-.hit-snippet {
-  margin-top: 6px;
-  font-size: 13px;
-  color: var(--el-text-color-regular);
-  line-height: 1.5;
-}
-</style>

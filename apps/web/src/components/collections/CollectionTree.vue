@@ -1,63 +1,57 @@
 <script setup lang="ts">
 import type { CollectionTreeNode } from '@jnowledge/shared'
+import { Plus } from 'lucide-vue-next'
+import TreeNode from '@/components/ui/TreeNode.vue'
+import SkeletonBlock from '@/components/ui/SkeletonBlock.vue'
+import Button from '@/components/ui/Button.vue'
 
-// 知识库树：纯展示，选择/新建子库/删除以事件上抛。
-defineProps<{ tree: CollectionTreeNode[]; loading: boolean }>()
+defineProps<{ tree: CollectionTreeNode[]; loading: boolean; selectedId?: string | null }>()
 const emit = defineEmits<{
   select: [id: string]
   create: [parentId: string | null]
   remove: [node: CollectionTreeNode]
 }>()
-
-const treeProps = { label: 'name', children: 'children' }
 </script>
 
 <template>
-  <el-card class="tree-pane" shadow="never">
-    <template #header>
-      <div class="pane-head">
-        <span>知识库</span>
-        <el-button text type="primary" @click="emit('create', null)">+ 新建</el-button>
-      </div>
-    </template>
-    <el-tree
-      v-loading="loading"
-      :data="tree"
-      :props="treeProps"
-      node-key="id"
-      highlight-current
-      @node-click="(node: CollectionTreeNode) => emit('select', node.id)"
-    >
-      <template #default="{ data }">
-        <span class="tree-node">
-          <span>{{ data.name }}</span>
-          <span class="tree-actions">
-            <el-button text size="small" @click.stop="emit('create', data.id)">子库</el-button>
-            <el-button text size="small" type="danger" @click.stop="emit('remove', data)">
-              删
-            </el-button>
-          </span>
-        </span>
-      </template>
-    </el-tree>
-    <el-empty v-if="!loading && tree.length === 0" description="暂无知识库" />
-  </el-card>
-</template>
+  <div
+    class="flex flex-col h-full bg-surface-dark/60 border border-white/[0.06] rounded-xl overflow-hidden"
+  >
+    <div class="flex items-center justify-between px-4 py-3 border-b border-white/[0.05] shrink-0">
+      <span class="font-semibold text-sm text-white/80">知识库</span>
+      <Button
+        variant="ghost"
+        size="sm"
+        class="text-brand hover:text-brand hover:bg-brand/10 h-7 px-2 text-xs"
+        @click="emit('create', null)"
+      >
+        <Plus :size="12" />
+        新建
+      </Button>
+    </div>
 
-<style scoped lang="less">
-.pane-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.tree-node {
-  display: flex;
-  flex: 1;
-  align-items: center;
-  justify-content: space-between;
-  padding-right: 8px;
-}
-.tree-actions {
-  opacity: 0.6;
-}
-</style>
+    <div v-if="loading" class="p-3 space-y-2">
+      <SkeletonBlock class="h-7 w-3/4" />
+      <SkeletonBlock class="h-7 w-1/2 ml-3" />
+      <SkeletonBlock class="h-7 w-2/3" />
+      <SkeletonBlock class="h-7 w-1/3 ml-6" />
+    </div>
+
+    <div v-else-if="tree.length === 0" class="flex-1 flex items-center justify-center text-white/25 text-sm">
+      暂无知识库
+    </div>
+
+    <div v-else class="flex-1 overflow-y-auto p-2">
+      <TreeNode
+        v-for="node in tree"
+        :key="node.id"
+        :node="node"
+        :level="0"
+        :selected-id="selectedId"
+        @select="emit('select', $event)"
+        @create="emit('create', $event)"
+        @remove="emit('remove', $event)"
+      />
+    </div>
+  </div>
+</template>

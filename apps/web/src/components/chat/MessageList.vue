@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import type { Citation, Message } from '@jnowledge/shared'
 import type { TraceStep } from '@/stores/chat'
+import { Sparkles } from 'lucide-vue-next'
 import MessageBubble from '@/components/chat/MessageBubble.vue'
 import StreamingBubble from '@/components/chat/StreamingBubble.vue'
 import { useAutoScroll } from '@/hooks/useAutoScroll'
 
-// 消息滚动区：已落库消息列表 + 流式期间末尾草稿气泡 + 空态。自身随消息/流式变化滚到底。
 const props = defineProps<{
   messages: Message[]
   streaming: boolean
@@ -25,7 +25,7 @@ const { scroller } = useAutoScroll([
 </script>
 
 <template>
-  <div ref="scroller" class="msg-scroll">
+  <div ref="scroller" class="flex-1 overflow-y-auto px-1 py-2">
     <MessageBubble
       v-for="m in messages"
       :key="m.id"
@@ -42,17 +42,18 @@ const { scroller } = useAutoScroll([
       @cite="emit('cite', $event)"
     />
 
-    <el-empty
+    <div
       v-if="messages.length === 0 && !streaming"
-      description="全局助手：自动选择相关知识库检索作答，并标注引用"
-    />
+      class="flex flex-col items-center justify-center h-full gap-4 text-white/30 py-16"
+    >
+      <div
+        class="w-16 h-16 rounded-full bg-gradient-to-br from-brand/20 to-brand-violet/20 flex items-center justify-center"
+      >
+        <Sparkles :size="28" class="text-brand/50" />
+      </div>
+      <p class="text-sm text-center max-w-xs leading-relaxed">
+        全局助手：自动选择相关知识库检索作答，并标注引用
+      </p>
+    </div>
   </div>
 </template>
-
-<style scoped lang="less">
-.msg-scroll {
-  flex: 1;
-  overflow-y: auto;
-  padding-right: 6px;
-}
-</style>

@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { toast } from 'vue-sonner'
 import type { Citation, Conversation, Message } from '@jnowledge/shared'
 import { chatApi } from '@/apis/chat'
 import { agentApi } from '@/apis/agent'
@@ -112,11 +112,11 @@ export const useChatStore = defineStore('chat', () => {
           })
           resetStream()
         } else if (ev.type === 'error') {
-          ElMessage.error(ev.message)
+          toast.error(ev.message)
         }
       })
     } catch (e) {
-      ElMessage.error(e instanceof Error ? e.message : '提问失败')
+      toast.error(e instanceof Error ? e.message : '提问失败')
     } finally {
       streaming.value = false
       resetStream()

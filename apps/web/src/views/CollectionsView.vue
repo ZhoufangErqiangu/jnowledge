@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import type { CollectionTreeNode } from '@jnowledge/shared'
+import { RefreshCw, Users, FilePlus, Upload } from 'lucide-vue-next'
 import { useCollectionsStore } from '@/stores/collections'
 import { useDocumentsStore } from '@/stores/documents'
 import { useApiAction } from '@/hooks/useApiAction'
@@ -13,6 +14,7 @@ import DocumentTable from '@/components/collections/DocumentTable.vue'
 import CreateCollectionDialog from '@/components/collections/CreateCollectionDialog.vue'
 import DocCreateDialog from '@/components/collections/DocCreateDialog.vue'
 import MembersDialog from '@/components/MembersDialog.vue'
+import Button from '@/components/ui/Button.vue'
 
 const router = useRouter()
 const collections = useCollectionsStore()
@@ -24,12 +26,10 @@ const selectedId = ref<string | null>(null)
 
 onMounted(() => collections.loadTree())
 
-// 选中知识库 → 加载其文档
 watch(selectedId, (id) => {
   if (id) documents.load(id)
 })
 
-// ---- 知识库：新建 / 删除 ----
 const createVisible = ref(false)
 const createParentId = ref<string | null>(null)
 function openCreate(parentId: string | null) {
@@ -50,10 +50,7 @@ function removeCollection(node: CollectionTreeNode) {
   })
 }
 
-// ---- 成员 ----
 const membersVisible = ref(false)
-
-// ---- 文档：新建 / 上传 / 删除 ----
 const docVisible = ref(false)
 async function submitDoc(payload: { title: string; content: string }) {
   if (!selectedId.value) return
@@ -64,56 +61,75 @@ async function submitDoc(payload: { title: string; content: string }) {
   if (ok !== undefined) docVisible.value = false
 }
 
-// el-upload http-request 钩子
+const fileInput = ref<HTMLInputElement>()
 function httpRequest(opt: { file: File }) {
   if (!selectedId.value) return
   return run(() => documents.upload(selectedId.value!, opt.file), '上传失败', '已受理，正在后台解析')
+}
+function handleFileChange(e: Event) {
+  const file = (e.target as HTMLInputElement).files?.[0]
+  if (file) httpRequest({ file })
+  if (fileInput.value) fileInput.value.value = ''
 }
 
 function removeDoc(id: string) {
   confirmDelete('确认删除该文档？', () => documents.remove(id))
 }
 
-// 处理中文档轮询刷新
 const hasProcessing = computed(() => documents.items.some((d) => isProcessing(d.status)))
 usePolling(hasProcessing, () => documents.reload(), 2000)
 </script>
 
 <template>
-  <div class="cols">
+  <div class="grid h-full gap-4" style="grid-template-columns: 300px 1fr">
     <CollectionTree
       :tree="collections.tree"
       :loading="collections.loading"
+      :selected-id="selectedId"
       @select="selectedId = $event"
       @create="openCreate"
       @remove="removeCollection"
     />
 
-    <!-- 右：文档面板 -->
-    <el-card class="doc-pane" shadow="never">
-      <template #header>
-        <div class="pane-head">
-          <span>文档</span>
-          <div v-if="selectedId" class="head-actions">
-            <el-button text type="primary" @click="membersVisible = true">成员</el-button>
-            <el-button text type="primary" @click="docVisible = true">新建文档</el-button>
-            <el-upload :show-file-list="false" :http-request="httpRequest">
-              <el-button type="primary" size="small">上传文件</el-button>
-            </el-upload>
-            <el-button text @click="documents.reload()">刷新</el-button>
-          </div>
+    <!-- Document pane -->
+    <div
+      class="flex flex-col h-full rounded-xl border border-white/[0.06] bg-surface/60 overflow-hidden"
+    >
+      <div class="flex items-center justify-between px-4 py-3 border-b border-white/[0.05] shrink-0">
+        <span class="font-semibold text-sm text-white/80">文档</span>
+        <div v-if="selectedId" class="flex items-center gap-1.5">
+          <Button variant="ghost" size="sm" class="gap-1.5" @click="membersVisible = true">
+            <Users :size="13" />成员
+          </Button>
+          <Button variant="ghost" size="sm" class="gap-1.5" @click="docVisible = true">
+            <FilePlus :size="13" />新建文档
+          </Button>
+          <Button size="sm" class="gap-1.5" @click="fileInput?.click()">
+            <Upload :size="13" />上传文件
+          </Button>
+          <input ref="fileInput" type="file" class="hidden" @change="handleFileChange" />
+          <Button variant="ghost" size="sm" @click="documents.reload()">
+            <RefreshCw :size="13" />
+          </Button>
         </div>
-      </template>
+      </div>
 
-      <el-empty v-if="!selectedId" description="请选择左侧知识库" />
-      <DocumentTable
-        v-else
-        :documents="documents.items"
-        :loading="documents.loading"
-        @open="(row) => router.push(`/documents/${row.id}`)"
-        @remove="removeDoc"
-      />
-    </el-card>
+      <div class="flex-1 overflow-auto p-4">
+        <div
+          v-if="!selectedId"
+          class="flex items-center justify-center h-full text-white/30 text-sm"
+        >
+          请选择左侧知识库
+        </div>
+        <DocumentTable
+          v-else
+          :documents="documents.items"
+          :loading="documents.loading"
+          @open="(row) => router.push(`/documents/${row.id}`)"
+          @remove="removeDoc"
+        />
+      </div>
+    </div>
 
     <CreateCollectionDialog
       v-model="createVisible"
@@ -124,22 +140,3 @@ usePolling(hasProcessing, () => documents.reload(), 2000)
     <MembersDialog v-model="membersVisible" :collection-id="selectedId" />
   </div>
 </template>
-
-<style scoped lang="less">
-.cols {
-  display: grid;
-  grid-template-columns: 300px 1fr;
-  gap: 16px;
-  height: 100%;
-}
-.pane-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.head-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-</style>

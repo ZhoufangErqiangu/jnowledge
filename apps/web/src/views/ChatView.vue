@@ -41,7 +41,7 @@ async function send() {
 </script>
 
 <template>
-  <div class="chat">
+  <div class="grid h-full gap-4" style="grid-template-columns: 260px 1fr">
     <ConversationList
       :conversations="chat.conversations"
       :current-id="chat.currentId"
@@ -50,56 +50,29 @@ async function send() {
       @remove="removeConversation"
     />
 
-    <el-card class="msg-pane" shadow="never">
-      <div v-if="chat.currentId" class="pane-toolbar">
+    <div
+      class="flex flex-col h-full rounded-xl border border-white/[0.06] bg-surface/60 overflow-hidden"
+    >
+      <div v-if="chat.currentId" class="flex justify-end px-4 py-2 border-b border-white/[0.05] shrink-0">
         <router-link
           :to="{ name: 'context-debug', params: { id: chat.currentId } }"
-          class="debug-link"
+          class="text-xs text-white/30 hover:text-white/50 transition-colors"
         >
           调试上下文
         </router-link>
       </div>
-      <MessageList
-        :messages="chat.messages"
-        :streaming="chat.streaming"
-        :stream-text="chat.streamText"
-        :stream-reasoning="chat.streamReasoning"
-        :stream-citations="chat.streamCitations"
-        :stream-steps="chat.streamSteps"
-        @cite="gotoCitation"
-      />
-      <ChatComposer v-model="input" :streaming="chat.streaming" @send="send" />
-    </el-card>
+      <div class="flex-1 flex flex-col px-4 pb-4 overflow-hidden">
+        <MessageList
+          :messages="chat.messages"
+          :streaming="chat.streaming"
+          :stream-text="chat.streamText"
+          :stream-reasoning="chat.streamReasoning"
+          :stream-citations="chat.streamCitations"
+          :stream-steps="chat.streamSteps"
+          @cite="gotoCitation"
+        />
+        <ChatComposer v-model="input" :streaming="chat.streaming" @send="send" />
+      </div>
+    </div>
   </div>
 </template>
-
-<style scoped lang="less">
-.chat {
-  display: grid;
-  grid-template-columns: 260px 1fr;
-  gap: 16px;
-  height: 100%;
-}
-.msg-pane {
-  display: flex;
-  flex-direction: column;
-}
-.msg-pane :deep(.el-card__body) {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-}
-.pane-toolbar {
-  display: flex;
-  justify-content: flex-end;
-  padding-bottom: 8px;
-}
-.debug-link {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-  text-decoration: none;
-}
-.debug-link:hover {
-  color: var(--el-color-primary);
-}
-</style>

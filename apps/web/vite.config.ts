@@ -19,6 +19,9 @@ export default defineConfig({
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },
+  css: {
+    postcss: './postcss.config.cjs',
+  },
   server: {
     port: 5173,
     proxy: Object.fromEntries(
