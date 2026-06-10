@@ -111,6 +111,32 @@ export function createMutationTools(deps: MutationToolDeps): Tool[] {
       },
     },
     {
+      name: 'import_file_entry',
+      description:
+        '把一个已上传的文件（或其压缩包内某条目）导入为知识库文档（解析与向量化在后台进行；压缩包条目经安全解压限额解出）。',
+      paramsSchema: z.object({
+        fileId: z.string().describe('已上传文件 id'),
+        collectionId: z.string().describe('目标知识库 id（必填，可先用 list_collections 获取）'),
+        entryPath: z
+          .string()
+          .optional()
+          .describe('压缩包内条目路径（取自 inspect_file 的清单）；非压缩包文件省略'),
+        title: z.string().min(1).optional().describe('文档标题（省略则按文件/条目名生成）'),
+        ...confirmTokenField,
+      }),
+      describe: (a) =>
+        `把上传文件 ${a.fileId}${a.entryPath ? ` 的条目「${a.entryPath}」` : ''}导入知识库 ${resolveCollection(a.collectionId)}`,
+      run: async (a, ctx) => {
+        const doc = await documentService.importFromFile(ctx.principal, {
+          fileId: a.fileId as string,
+          collectionId: resolveCollection(a.collectionId),
+          ...(a.entryPath !== undefined ? { entryPath: a.entryPath as string } : {}),
+          ...(a.title !== undefined ? { title: a.title as string } : {}),
+        })
+        return `已导入为文档《${doc.title}》（id=${doc.id}），正在后台解析与向量化。`
+      },
+    },
+    {
       name: 'update_document',
       description: '修改一篇已有文档的标题和/或正文（改正文会建新版本并重新向量化）。',
       paramsSchema: z.object({
@@ -273,6 +299,7 @@ export function createMutationTools(deps: MutationToolDeps): Tool[] {
     }
     if (
       spec.name === 'create_document' ||
+      spec.name === 'import_file_entry' ||
       spec.name === 'rename_collection' ||
       spec.name === 'delete_collection'
     )
