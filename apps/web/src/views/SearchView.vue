@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { Search } from 'lucide-vue-next'
 import type { SearchHit } from '@jnowledge/shared'
 import { searchApi } from '@/apis/search'
@@ -9,16 +9,24 @@ import Button from '@/components/ui/Button.vue'
 import Badge from '@/components/ui/Badge.vue'
 
 const router = useRouter()
+const route = useRoute()
 const { run } = useApiAction()
 
-const query = ref('')
+const query = ref((route.query.query as string) ?? '')
 const hits = ref<SearchHit[]>([])
 const loading = ref(false)
 const searched = ref(false)
 
-async function search() {
+// URL 是检索词的真相源：提交即写入 ?query=，由 watch 触发实际检索，
+// 这样直接访问 /search?query=xxx 或前进/后退都能复现结果。
+function search() {
   const q = query.value.trim()
-  if (!q || loading.value) return
+  if (!q) return
+  router.push({ name: 'search', query: { query: q } })
+}
+
+async function exec(q: string) {
+  if (loading.value) return
   loading.value = true
   const res = await run(() => searchApi.search(q), '检索失败')
   loading.value = false
@@ -27,6 +35,21 @@ async function search() {
     searched.value = true
   }
 }
+
+watch(
+  () => route.query.query,
+  (raw) => {
+    const q = ((raw as string) ?? '').trim()
+    query.value = q
+    if (q) {
+      exec(q)
+    } else {
+      hits.value = []
+      searched.value = false
+    }
+  },
+  { immediate: true },
+)
 
 function open(hit: SearchHit) {
   router.push(`/documents/${hit.documentId}`)

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import type { CollectionTreeNode } from '@jnowledge/shared'
 import { RefreshCw, Users, FilePlus, Upload } from 'lucide-vue-next'
 import { useCollectionsStore } from '@/stores/collections'
@@ -17,18 +17,35 @@ import MembersDialog from '@/components/MembersDialog.vue'
 import Button from '@/components/ui/Button.vue'
 
 const router = useRouter()
+const route = useRoute()
 const collections = useCollectionsStore()
 const documents = useDocumentsStore()
 const { run } = useApiAction()
 const { confirmDelete } = useConfirmDelete()
 
-const selectedId = ref<string | null>(null)
+// 路由是选中知识库的真相源：/collections/<id> ↔ selectedId。
+const selectedId = ref<string | null>((route.params.id as string) ?? null)
 
 onMounted(() => collections.loadTree())
 
-watch(selectedId, (id) => {
-  if (id) documents.load(id)
-})
+watch(
+  () => route.params.id,
+  (id) => {
+    selectedId.value = (id as string) ?? null
+  },
+)
+
+watch(
+  selectedId,
+  (id) => {
+    if (id) documents.load(id)
+  },
+  { immediate: true },
+)
+
+function selectCollection(id: string) {
+  router.push(`/collections/${id}`)
+}
 
 const createVisible = ref(false)
 const createParentId = ref<string | null>(null)
@@ -46,7 +63,7 @@ async function submitCreate(name: string) {
 function removeCollection(node: CollectionTreeNode) {
   confirmDelete(`确认删除知识库「${node.name}」？`, async () => {
     await collections.remove(node.id)
-    if (selectedId.value === node.id) selectedId.value = null
+    if (selectedId.value === node.id) router.push('/collections')
   })
 }
 
@@ -83,7 +100,7 @@ usePolling(hasProcessing, () => documents.reload(), 2000)
 <template>
   <div class="grid h-full gap-4" style="grid-template-columns: 300px 1fr">
     <CollectionTree :tree="collections.tree" :loading="collections.loading" :selected-id="selectedId"
-      @select="selectedId = $event" @create="openCreate" @remove="removeCollection" />
+      @select="selectCollection" @create="openCreate" @remove="removeCollection" />
 
     <!-- Document pane -->
     <div class="flex flex-col h-full rounded-xl border border-white/[0.06] bg-surface/60 overflow-hidden">

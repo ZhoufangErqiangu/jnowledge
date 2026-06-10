@@ -17,6 +17,11 @@ const router = createRouter({
           component: () => import('@/views/CollectionsView.vue'),
         },
         {
+          path: 'collections/:id',
+          name: 'collection',
+          component: () => import('@/views/CollectionsView.vue'),
+        },
+        {
           path: 'documents/:id',
           name: 'document',
           component: () => import('@/views/DocumentDetailView.vue'),
@@ -24,6 +29,11 @@ const router = createRouter({
         {
           path: 'chat',
           name: 'global-chat',
+          component: () => import('@/views/ChatView.vue'),
+        },
+        {
+          path: 'chat/:id',
+          name: 'chat',
           component: () => import('@/views/ChatView.vue'),
         },
         {
