@@ -30,7 +30,10 @@ export function createAgentController(c: Container): Router<AppState> {
     const send = (ev: AgentStreamEvent) => res.write(`data: ${JSON.stringify(ev)}\n\n`)
 
     try {
-      for await (const ev of agent.ask(p, ctx.params.id!, req.question)) {
+      for await (const ev of agent.ask(p, ctx.params.id!, req.question, {
+        ...(req.tier !== undefined ? { tier: req.tier } : {}),
+        ...(req.thinking !== undefined ? { thinking: req.thinking } : {}),
+      })) {
         if (res.writableEnded) break // 客户端断开则停止拉取
         send(ev)
       }

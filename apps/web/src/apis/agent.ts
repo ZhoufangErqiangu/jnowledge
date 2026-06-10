@@ -1,5 +1,11 @@
-import type { AgentStreamEvent } from '@jnowledge/shared'
+import type { AgentStreamEvent, MainReasoningTier } from '@jnowledge/shared'
 import { streamSSE } from './sse'
+
+/** 主推理选项（仅作用于顶层推理）。 */
+export interface AskOptions {
+  tier?: MainReasoningTier
+  thinking?: boolean
+}
 
 export const agentApi = {
   /**
@@ -10,11 +16,12 @@ export const agentApi = {
     conversationId: string,
     question: string,
     onEvent: (ev: AgentStreamEvent) => void,
+    options?: AskOptions,
     signal?: AbortSignal,
   ): Promise<void> {
     await streamSSE<AgentStreamEvent>(
       `/conversations/${conversationId}/agent`,
-      { question },
+      { question, ...options },
       onEvent,
       signal,
     )

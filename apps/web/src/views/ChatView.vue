@@ -71,7 +71,13 @@ async function send() {
           :stream-steps="chat.streamSteps"
           @cite="gotoCitation"
         />
-        <ChatComposer v-model="input" :streaming="chat.streaming" @send="send" />
+        <ChatComposer
+          v-model="input"
+          v-model:tier="chat.tier"
+          v-model:thinking="chat.thinking"
+          :streaming="chat.streaming"
+          @send="send"
+        />
       </div>
     </div>
   </div>

@@ -54,6 +54,10 @@ export type ContentFormat = (typeof CONTENT_FORMATS)[number]
 export const LLM_TIERS = ['heavy', 'standard', 'light', 'nano'] as const
 export type LlmTier = (typeof LLM_TIERS)[number]
 
+/** 用户可选的主推理档位（聊天框模型切换；nano 仅内部工具用，不暴露）。 */
+export const MAIN_REASONING_TIERS = ['heavy', 'standard', 'light'] as const
+export type MainReasoningTier = (typeof MAIN_REASONING_TIERS)[number]
+
 /** 会话消息角色（二期 RAG 问答）。 */
 export const MESSAGE_ROLES = ['user', 'assistant'] as const
 export type MessageRole = (typeof MESSAGE_ROLES)[number]

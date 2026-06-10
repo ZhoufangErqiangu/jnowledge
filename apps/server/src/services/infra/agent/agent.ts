@@ -1,5 +1,5 @@
 import type { LlmTier } from '@jnowledge/shared'
-import type { AgentTurnMessage, LlmUsage, ToolCall, ToolSpec } from '../llm/types.js'
+import type { AgentTurnMessage, LlmUsage, Thinking, ToolCall, ToolSpec } from '../llm/types.js'
 import { toToolSpec } from './registry.js'
 import {
   type AgentEvent,
@@ -14,6 +14,8 @@ export interface AgentConfig {
   name: string
   description: string
   tier: LlmTier
+  /** 主推理 thinking 开关；缺省（undefined）随模型默认，不下发 thinking 参数。 */
+  thinking?: Thinking
   /** 最大步数熔断（默认 DEFAULT_MAX_STEPS）。 */
   maxSteps?: number
   /** 已组装的 system 前缀（domain 经 assembleSystemPrompt 产出；易变后缀走 history）。 */
@@ -128,7 +130,11 @@ export class Agent {
     const startedAt = Date.now()
     for await (const chunk of ctx.llm.chat
       .tier(this.config.tier)
-      .generateStream({ messages: this.messages, tools: this.toolSpecs })) {
+      .generateStream({
+        messages: this.messages,
+        tools: this.toolSpecs,
+        ...(this.config.thinking !== undefined ? { thinking: this.config.thinking } : {}),
+      })) {
       if (ctx.signal.aborted) break
       if (chunk.type === 'reasoning') {
         this.approxChars += chunk.delta.length

@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { toast } from 'vue-sonner'
-import type { Citation, Conversation, Message } from '@jnowledge/shared'
+import type { Citation, Conversation, MainReasoningTier, Message } from '@jnowledge/shared'
 import { chatApi } from '@/apis/chat'
 import { agentApi } from '@/apis/agent'
 
@@ -29,6 +29,10 @@ export const useChatStore = defineStore('chat', () => {
   const streamCitations = ref<Citation[]>([])
   // Agent 模式下的实时执行轨迹。
   const streamSteps = ref<TraceStep[]>([])
+
+  // 主推理控制（仅作用于顶层推理；随每次提问下发）。
+  const tier = ref<MainReasoningTier>('standard')
+  const thinking = ref(true)
 
   async function loadConversations() {
     conversations.value = await chatApi.list()
@@ -114,7 +118,7 @@ export const useChatStore = defineStore('chat', () => {
         } else if (ev.type === 'error') {
           toast.error(ev.message)
         }
-      })
+      }, { tier: tier.value, thinking: thinking.value })
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '提问失败')
     } finally {
@@ -134,6 +138,8 @@ export const useChatStore = defineStore('chat', () => {
     streamReasoning,
     streamCitations,
     streamSteps,
+    tier,
+    thinking,
     loadConversations,
     open,
     create,

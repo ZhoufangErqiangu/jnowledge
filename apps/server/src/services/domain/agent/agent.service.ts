@@ -1,5 +1,5 @@
 import { uuidv7 } from 'uuidv7'
-import { ERROR_CODES, type AgentStreamEvent } from '@jnowledge/shared'
+import { ERROR_CODES, type AgentStreamEvent, type MainReasoningTier } from '@jnowledge/shared'
 import type { Models } from '../../../models/index.js'
 import { type RunContext, createToolRegistry } from '../../infra/agent/index.js'
 import { assembleSystemPrompt, buildScopeSuffix } from './systemPrompt.js'
@@ -30,9 +30,22 @@ export interface AgentDeps {
   retrieval: RetrievalService
 }
 
+/** 顶层问答的主推理选项（仅作用于顶层推理；委派子 agent/工具不受影响）。 */
+export interface AskOptions {
+  /** 主推理档位覆盖；缺省用人设 tier。 */
+  tier?: MainReasoningTier
+  /** 是否启用主推理 thinking；缺省随模型默认。 */
+  thinking?: boolean
+}
+
 export interface AgentService {
   /** Agent 流式问答：ReAct 自主编排检索/读文档；产 SSE 轨迹 + 答复；落 run/steps/message。 */
-  ask(p: Principal, conversationId: string, question: string): AsyncIterable<AgentStreamEvent>
+  ask(
+    p: Principal,
+    conversationId: string,
+    question: string,
+    options?: AskOptions,
+  ): AsyncIterable<AgentStreamEvent>
 }
 
 /** wall-clock 熔断（ms）。 */
@@ -111,6 +124,7 @@ export function createAgentService(deps: AgentDeps): AgentService {
     p: Principal,
     conversationId: string,
     question: string,
+    options: AskOptions = {},
   ): AsyncIterable<AgentStreamEvent> {
     let cv
     try {
@@ -213,7 +227,13 @@ export function createAgentService(deps: AgentDeps): AgentService {
 
       // 顶层 agent：身份/工具/前轮对话构造期注入；run+落库+引用校验+生命周期收口都在 agent 内。
       const agent = new TopLevelAgent(
-        { system, tools: registry.select(persona.toolNames), history },
+        {
+          system,
+          tools: registry.select(persona.toolNames),
+          history,
+          ...(options.tier !== undefined ? { tier: options.tier } : {}),
+          ...(options.thinking !== undefined ? { thinking: options.thinking } : {}),
+        },
         {
           contextItems: models.contextItems,
           agentRuns: models.agentRuns,

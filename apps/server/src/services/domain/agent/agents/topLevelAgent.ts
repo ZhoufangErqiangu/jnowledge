@@ -3,7 +3,8 @@ import type { AgentRunRepo } from '../../../../models/agentRun.repo.js'
 import type { ContextItemRepo } from '../../../../models/contextItem.repo.js'
 import type { ConversationRepo } from '../../../../models/conversation.repo.js'
 import type { Logger } from '../../../../logger.js'
-import type { AgentTurnMessage } from '../../../infra/llm/types.js'
+import type { LlmTier } from '@jnowledge/shared'
+import type { AgentTurnMessage, Thinking } from '../../../infra/llm/types.js'
 import type { AgentDef, RunContext, Tool } from '../../../infra/agent/index.js'
 import { RecordedAgent } from './recordedAgent.js'
 
@@ -67,7 +68,15 @@ export class TopLevelAgent extends RecordedAgent {
   protected readonly recordState = 'active' as const
 
   constructor(
-    opts: { system: string; tools: Tool[]; history: AgentTurnMessage[] },
+    opts: {
+      system: string
+      tools: Tool[]
+      history: AgentTurnMessage[]
+      /** 主推理档位覆盖（缺省用人设 tier）；仅作用于顶层推理，不传递给委派子 agent。 */
+      tier?: LlmTier
+      /** 主推理 thinking 开关（缺省随模型默认）；同样只作用于顶层推理。 */
+      thinking?: Thinking
+    },
     private readonly deps: TopLevelAgentDeps,
   ) {
     const { persona } = TopLevelAgent
@@ -75,7 +84,8 @@ export class TopLevelAgent extends RecordedAgent {
       {
         name: persona.name,
         description: persona.description,
-        tier: persona.tier,
+        tier: opts.tier ?? persona.tier,
+        ...(opts.thinking !== undefined ? { thinking: opts.thinking } : {}),
         ...(persona.maxSteps !== undefined ? { maxSteps: persona.maxSteps } : {}),
         system: opts.system,
         tools: opts.tools,

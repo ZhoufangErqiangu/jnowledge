@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { AGENT_RUN_STATUSES, AGENT_STEP_KINDS } from '../constants/enums.js'
+import { AGENT_RUN_STATUSES, AGENT_STEP_KINDS, MAIN_REASONING_TIERS } from '../constants/enums.js'
 import { isoDateSchema, uuidSchema } from './common.js'
 import { citationSchema, type Citation } from './chat.js'
 
@@ -40,6 +40,10 @@ export type AgentStep = z.infer<typeof agentStepSchema>
 /** Agent 提问（在已建会话内，与 RAG 的 /ask 并存，互不影响）。 */
 export const agentAskRequestSchema = z.object({
   question: z.string().min(1).max(4000),
+  /** 主推理档位覆盖（仅作用于顶层推理；缺省用人设 tier）。 */
+  tier: z.enum(MAIN_REASONING_TIERS).optional(),
+  /** 是否启用主推理 thinking（仅作用于顶层推理；缺省随模型默认）。 */
+  thinking: z.boolean().optional(),
 })
 export type AgentAskRequest = z.infer<typeof agentAskRequestSchema>
 
