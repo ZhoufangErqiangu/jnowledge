@@ -2,7 +2,7 @@
 import { computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import Button from '@/components/ui/Button.vue'
+import UserMenu from '@/components/UserMenu.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -41,7 +41,9 @@ function isActive(path: string) {
         📚 jnowledge
       </button>
 
-      <div class="flex items-center gap-0.5">
+      <div class="flex-1" />
+
+      <nav class="flex items-center gap-0.5">
         <button
           v-for="link in navLinks"
           :key="link.to"
@@ -55,14 +57,11 @@ function isActive(path: string) {
         >
           {{ link.label }}
         </button>
+      </nav>
+
+      <div class="ml-2 pl-3 border-l border-white/[0.06]">
+        <UserMenu :user="auth.user" @logout="logout" />
       </div>
-
-      <div class="flex-1" />
-
-      <span class="text-sm text-white/40 hidden sm:block">
-        {{ auth.user?.displayName || auth.user?.email }}
-      </span>
-      <Button variant="ghost" size="sm" @click="logout">退出</Button>
     </header>
 
     <main class="flex-1 overflow-auto p-4">

@@ -1,13 +1,12 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import type { CollectionTreeNode } from '@jnowledge/shared'
-import { ChevronRight, BookOpen, Plus, Trash2 } from 'lucide-vue-next'
+import { ChevronRight, BookOpen, Trash2 } from 'lucide-vue-next'
 import { cn } from '@/lib/utils'
 
 defineProps<{ node: CollectionTreeNode; level: number; selectedId?: string | null | undefined }>()
 const emit = defineEmits<{
   select: [id: string]
-  create: [parentId: string]
   remove: [node: CollectionTreeNode]
 }>()
 
@@ -30,24 +29,20 @@ const expanded = ref(true)
       @click="emit('select', node.id)"
     >
       <ChevronRight
+        v-if="node.children?.length"
         :size="12"
         :class="
           cn(
             'text-white/30 transition-transform duration-150 shrink-0',
-            expanded && node.children?.length ? 'rotate-90' : '',
+            expanded ? 'rotate-90' : '',
           )
         "
         @click.stop="expanded = !expanded"
       />
+      <span v-else class="w-3 shrink-0" />
       <BookOpen :size="13" class="text-brand/60 shrink-0" />
       <span class="truncate flex-1">{{ node.name }}</span>
       <span class="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 transition-opacity">
-        <button
-          class="p-0.5 rounded hover:bg-brand/20 hover:text-brand text-white/40 transition-colors"
-          @click.stop="emit('create', node.id)"
-        >
-          <Plus :size="11" />
-        </button>
         <button
           class="p-0.5 rounded hover:bg-red-500/20 hover:text-red-400 text-white/40 transition-colors"
           @click.stop="emit('remove', node)"
@@ -65,7 +60,6 @@ const expanded = ref(true)
         :level="level + 1"
         :selected-id="selectedId"
         @select="emit('select', $event)"
-        @create="emit('create', $event)"
         @remove="emit('remove', $event)"
       />
     </div>

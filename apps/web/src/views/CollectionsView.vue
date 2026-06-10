@@ -82,60 +82,40 @@ usePolling(hasProcessing, () => documents.reload(), 2000)
 
 <template>
   <div class="grid h-full gap-4" style="grid-template-columns: 300px 1fr">
-    <CollectionTree
-      :tree="collections.tree"
-      :loading="collections.loading"
-      :selected-id="selectedId"
-      @select="selectedId = $event"
-      @create="openCreate"
-      @remove="removeCollection"
-    />
+    <CollectionTree :tree="collections.tree" :loading="collections.loading" :selected-id="selectedId"
+      @select="selectedId = $event" @create="openCreate" @remove="removeCollection" />
 
     <!-- Document pane -->
-    <div
-      class="flex flex-col h-full rounded-xl border border-white/[0.06] bg-surface/60 overflow-hidden"
-    >
+    <div class="flex flex-col h-full rounded-xl border border-white/[0.06] bg-surface/60 overflow-hidden">
       <div class="flex items-center justify-between px-4 py-3 border-b border-white/[0.05] shrink-0">
         <span class="font-semibold text-sm text-white/80">文档</span>
-        <div v-if="selectedId" class="flex items-center gap-1.5">
-          <Button variant="ghost" size="sm" class="gap-1.5" @click="membersVisible = true">
+        <div class="flex items-center gap-1.5">
+          <Button variant="ghost" size="sm" class="gap-1.5" :disabled="!selectedId" @click="membersVisible = true">
             <Users :size="13" />成员
           </Button>
-          <Button variant="ghost" size="sm" class="gap-1.5" @click="docVisible = true">
+          <Button variant="ghost" size="sm" class="gap-1.5" :disabled="!selectedId" @click="docVisible = true">
             <FilePlus :size="13" />新建文档
           </Button>
-          <Button size="sm" class="gap-1.5" @click="fileInput?.click()">
+          <Button size="sm" class="gap-1.5" :disabled="!selectedId" @click="fileInput?.click()">
             <Upload :size="13" />上传文件
           </Button>
           <input ref="fileInput" type="file" class="hidden" @change="handleFileChange" />
-          <Button variant="ghost" size="sm" @click="documents.reload()">
+          <Button variant="ghost" size="sm" :disabled="!selectedId" @click="documents.reload()">
             <RefreshCw :size="13" />
           </Button>
         </div>
       </div>
 
       <div class="flex-1 overflow-auto p-4">
-        <div
-          v-if="!selectedId"
-          class="flex items-center justify-center h-full text-white/30 text-sm"
-        >
+        <div v-if="!selectedId" class="flex items-center justify-center h-full text-white/30 text-sm">
           请选择左侧知识库
         </div>
-        <DocumentTable
-          v-else
-          :documents="documents.items"
-          :loading="documents.loading"
-          @open="(row) => router.push(`/documents/${row.id}`)"
-          @remove="removeDoc"
-        />
+        <DocumentTable v-else :documents="documents.items" :loading="documents.loading"
+          @open="(row) => router.push(`/documents/${row.id}`)" @remove="removeDoc" />
       </div>
     </div>
 
-    <CreateCollectionDialog
-      v-model="createVisible"
-      :parent-id="createParentId"
-      @submit="submitCreate"
-    />
+    <CreateCollectionDialog v-model="createVisible" :parent-id="createParentId" @submit="submitCreate" />
     <DocCreateDialog v-model="docVisible" @submit="submitDoc" />
     <MembersDialog v-model="membersVisible" :collection-id="selectedId" />
   </div>

@@ -49,7 +49,6 @@ const emit = defineEmits<{
         :level="0"
         :selected-id="selectedId"
         @select="emit('select', $event)"
-        @create="emit('create', $event)"
         @remove="emit('remove', $event)"
       />
     </div>
