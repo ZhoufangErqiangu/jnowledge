@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { CollectionTreeNode } from '@jnowledge/shared'
 import { RefreshCw, Users, FilePlus, Upload } from 'lucide-vue-next'
+import { toast } from 'vue-sonner'
 import { useCollectionsStore } from '@/stores/collections'
 import { useDocumentsStore } from '@/stores/documents'
 import { useApiAction } from '@/hooks/useApiAction'
@@ -79,14 +80,15 @@ async function submitDoc(payload: { title: string; content: string }) {
 }
 
 const fileInput = ref<HTMLInputElement>()
-function httpRequest(opt: { file: File }) {
-  if (!selectedId.value) return
-  return run(() => documents.upload(selectedId.value!, opt.file), '上传失败', '已受理，正在后台解析')
-}
-function handleFileChange(e: Event) {
-  const file = (e.target as HTMLInputElement).files?.[0]
-  if (file) httpRequest({ file })
+async function handleFileChange(e: Event) {
+  const files = Array.from((e.target as HTMLInputElement).files ?? [])
   if (fileInput.value) fileInput.value.value = ''
+  if (!selectedId.value || !files.length) return
+  await Promise.all(
+    files.map((file) => run(() => documents.upload(selectedId.value!, file), '上传失败')),
+  )
+  if (files.length > 1) toast.success(`已受理 ${files.length} 个文件，正在后台解析`)
+  else if (files.length === 1) toast.success('已受理，正在后台解析')
 }
 
 function removeDoc(id: string) {
@@ -116,7 +118,7 @@ usePolling(hasProcessing, () => documents.reload(), 2000)
           <Button size="sm" class="gap-1.5" :disabled="!selectedId" @click="fileInput?.click()">
             <Upload :size="13" />上传文件
           </Button>
-          <input ref="fileInput" type="file" class="hidden" @change="handleFileChange" />
+          <input ref="fileInput" type="file" multiple class="hidden" @change="handleFileChange" />
           <Button variant="ghost" size="sm" :disabled="!selectedId" @click="documents.reload()">
             <RefreshCw :size="13" />
           </Button>

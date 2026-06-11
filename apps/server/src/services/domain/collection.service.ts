@@ -72,6 +72,8 @@ export function createCollectionService(deps: CollectionDeps): CollectionService
     async create(p, req) {
       // 若指定父节点，需对父节点有 editor 权限
       if (req.parentId) await assertRole(p, req.parentId, 'editor')
+      const dup = await collections.findByNameAndParent(p.uid, req.name, req.parentId ?? null)
+      if (dup) throw new AppError(ERROR_CODES.CONFLICT, '同级知识库下已存在同名知识库')
       const row = await collections.insert({
         id: uuidv7(),
         name: req.name,
@@ -87,8 +89,13 @@ export function createCollectionService(deps: CollectionDeps): CollectionService
     },
 
     async update(p, id, req) {
-      await assertRole(p, id, 'editor')
+      const existing = await assertRole(p, id, 'editor')
       if (req.parentId) await assertRole(p, req.parentId, 'editor')
+      if (req.name !== undefined) {
+        const parentId = req.parentId !== undefined ? req.parentId : existing.parent_id
+        const dup = await collections.findByNameAndParent(existing.owner_id, req.name, parentId, id)
+        if (dup) throw new AppError(ERROR_CODES.CONFLICT, '同级知识库下已存在同名知识库')
+      }
       const patch: Parameters<CollectionRepo['update']>[1] = {}
       if (req.name !== undefined) patch.name = req.name
       if (req.parentId !== undefined) patch.parentId = req.parentId

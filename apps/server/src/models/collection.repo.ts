@@ -33,6 +33,25 @@ export function createCollectionRepo(db: DB) {
         .executeTakeFirst()
     },
 
+    async findByNameAndParent(
+      ownerId: string,
+      name: string,
+      parentId: string | null,
+      excludeId?: string,
+    ): Promise<CollectionRow | undefined> {
+      let q = db
+        .selectFrom('collections')
+        .selectAll()
+        .where('owner_id', '=', ownerId)
+        .where('name', '=', name)
+        .where('deleted_at', 'is', null)
+      q = parentId
+        ? q.where('parent_id', '=', parentId)
+        : q.where('parent_id', 'is', null)
+      if (excludeId) q = q.where('id', '!=', excludeId)
+      return q.executeTakeFirst()
+    },
+
     /** 用户可见的全部知识库（owner 或 member）。一期按平铺返回，树由 service 组装。 */
     async listForUser(userId: string): Promise<CollectionRow[]> {
       return db

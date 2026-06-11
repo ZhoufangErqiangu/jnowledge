@@ -21,8 +21,9 @@ export const useCollectionsStore = defineStore('collections', () => {
   }
 
   async function create(req: CreateCollectionRequest) {
-    await collectionsApi.create(req)
+    const result = await collectionsApi.create(req)
     await loadTree()
+    return result
   }
 
   async function update(id: string, req: UpdateCollectionRequest) {
