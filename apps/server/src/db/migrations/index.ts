@@ -7,6 +7,7 @@ import * as pendingOps from './005_pending_operations.js'
 import * as contextItems from './006_context_items.js'
 import * as dropLegacyLogs from './007_drop_legacy_logs.js'
 import * as runTree from './008_run_tree.js'
+import * as seedAdmin from './009_seed_admin.js'
 
 /**
  * 显式迁移注册表（不做目录扫描，与全仓"显式注册"约定一致）。
@@ -21,4 +22,5 @@ export const migrations: Record<string, Migration> = {
   '006_context_items': contextItems,
   '007_drop_legacy_logs': dropLegacyLogs,
   '008_run_tree': runTree,
+  '009_seed_admin': seedAdmin,
 }

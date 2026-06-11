@@ -4,7 +4,6 @@ import { loadConfig } from '../config/index.js'
 import { createDb } from './index.js'
 import type { Database } from '../models/schema.js'
 import { migrations } from './migrations/index.js'
-import { seedAdmin } from './seed.js'
 
 /** 把显式注册表喂给 Kysely Migrator（替代 FileMigrationProvider 的目录扫描）。 */
 const provider: MigrationProvider = {
@@ -35,16 +34,10 @@ async function main() {
   }
 
   if (error) {
-     
+
     console.error('迁移失败：', error)
     await db.destroy()
     process.exit(1)
-  }
-
-  // 迁移到最新后幂等创建引导管理员（down 时不种子）。
-  if (direction !== 'down') {
-    const result = await seedAdmin(db, config.auth.bcryptCost)
-    console.log(`· admin 引导用户：${result === 'created' ? '已创建' : '已存在'}`)
   }
 
   await db.destroy()
