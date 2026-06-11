@@ -81,8 +81,8 @@ export interface RunContext {
   runId: string
   /** agent-as-tool 递归深度（防无限递归，配合 MAX_AGENT_DEPTH）。 */
   depth: number
-  /** wall-clock 熔断的截止时间戳（ms）。 */
-  deadline: number
+  /** 单步（一次 LLM 调用）的 wall-clock 超时（ms）；超限即熔断该步，不累计总时长。 */
+  stepTimeoutMs: number
   /** 近似 token 预算（按累计字符数估算）的字符上限。 */
   charBudget: number
   signal: AbortSignal

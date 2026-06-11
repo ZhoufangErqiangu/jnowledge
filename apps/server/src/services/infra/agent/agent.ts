@@ -1,5 +1,6 @@
 import type { LlmTier } from '@jnowledge/shared'
 import type { AgentTurnMessage, LlmUsage, Thinking, ToolCall, ToolSpec } from '../llm/types.js'
+import { LlmError } from '../llm/types.js'
 import { toToolSpec } from './registry.js'
 import {
   type AgentEvent,
@@ -76,16 +77,24 @@ export class Agent {
 
     for (let step = 0; step < this.maxSteps; step++) {
       if (ctx.signal.aborted) return
-      if (Date.now() > ctx.deadline) {
-        yield { type: 'error', message: '运行超时（wall-clock 熔断）' }
-        return
-      }
       if (this.approxChars > ctx.charBudget) {
         yield { type: 'error', message: 'token 预算超限（熔断）' }
         return
       }
 
-      const turn = yield* this.decide(ctx)
+      let turn: TurnResult
+      try {
+        turn = yield* this.decide(ctx)
+      } catch (err) {
+        const message =
+          err instanceof LlmError && err.kind === 'timeout'
+            ? `单步推理超时（${ctx.stepTimeoutMs}ms 熔断）`
+            : err instanceof Error
+              ? err.message
+              : '推理失败'
+        yield { type: 'error', message }
+        return
+      }
       // decide 在 abort 时中断流并返回部分结果；这里收口，不再 emit final/error。
       if (ctx.signal.aborted) return
 
@@ -133,6 +142,7 @@ export class Agent {
       .generateStream({
         messages: this.messages,
         tools: this.toolSpecs,
+        timeoutMs: ctx.stepTimeoutMs,
         ...(this.config.thinking !== undefined ? { thinking: this.config.thinking } : {}),
       })) {
       if (ctx.signal.aborted) break

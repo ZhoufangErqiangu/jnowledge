@@ -85,7 +85,27 @@ export function buildSubAgentTool(spec: SubAgentToolSpec, deps: { agentRuns: Age
         depth: ctx.depth + 1,
         scope: narrow(ctx.scope, requestedScope),
       }
-      return agent.runAsChild(spec.name, childCtx)
+      const citationsBefore = ctx.citations.length
+      const result = await agent.runAsChild(spec.name, childCtx)
+      if (result.ok && typeof result.output === 'string') {
+        const newCitations = ctx.citations.slice(citationsBefore)
+        if (newCitations.length > 0) {
+          const seen = new Set<string>()
+          const docs: { id: string; title: string }[] = []
+          for (const c of newCitations) {
+            if (!seen.has(c.documentId)) {
+              seen.add(c.documentId)
+              docs.push({ id: c.documentId, title: c.documentTitle })
+            }
+          }
+          const footer = docs.map((d) => `  • 《${d.title}》 document_id: ${d.id}`).join('\n')
+          return {
+            ...result,
+            output: `${result.output}\n\n**涉及文档（document_id 可直接传给 get_document / update_document）**\n${footer}`,
+          }
+        }
+      }
+      return result
     },
   }
 }

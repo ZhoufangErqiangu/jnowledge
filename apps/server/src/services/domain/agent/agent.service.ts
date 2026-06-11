@@ -48,8 +48,8 @@ export interface AgentService {
   ): AsyncIterable<AgentStreamEvent>
 }
 
-/** wall-clock 熔断（ms）。 */
-const RUN_WALL_CLOCK_MS = 120_000
+/** 单步（一次 LLM 调用）wall-clock 超时（ms）；超限即熔断该步，多步累计不受此约束。 */
+const STEP_TIMEOUT_MS = 60_000
 /** 近似 token 预算（按字符数估算）的字符上限。 */
 const RUN_CHAR_BUDGET = 200_000
 /** 跨轮历史投影进 LLM 上下文的字符预算（留余量给本轮工具结果与生成）。 */
@@ -171,7 +171,7 @@ export function createAgentService(deps: AgentDeps): AgentService {
         conversationId,
         runId,
         depth: 0,
-        deadline: Date.now() + RUN_WALL_CLOCK_MS,
+        stepTimeoutMs: STEP_TIMEOUT_MS,
         charBudget: RUN_CHAR_BUDGET,
         signal: new AbortController().signal,
         llm,

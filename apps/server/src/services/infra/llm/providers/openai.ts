@@ -196,8 +196,8 @@ export abstract class OpenAIChatProvider implements LLMCapability {
 // ---- OpenAI 形状的请求/响应辅助：基类专用，对子类不可见 ----
 
 /**
- * 单次 HTTP 调用默认超时（ms）。对齐 run wall-clock 熔断（120s）——单次 LLM 调用本就不该超过整个 run 预算；
- * 主要兜底"provider 无响应/中途 stall 导致请求永久挂起"。需要更紧的调用方（如并发的 RAG 过滤）自带更短 timeoutMs。
+ * 单次 HTTP 调用默认超时（ms）：兜底 "provider 无响应/中途 stall 导致请求永久挂起"。
+ * agent 层经 stepTimeoutMs 覆盖此值；其余调用方（如并发 RAG 过滤）可自带更短 timeoutMs。
  */
 const DEFAULT_CALL_TIMEOUT_MS = 120_000
 
