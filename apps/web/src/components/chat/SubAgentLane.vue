@@ -15,16 +15,16 @@ const toolsOpen = ref(false)
 </script>
 
 <template>
-  <div class="flex mt-2" :style="{ marginLeft: `${(props.lane.depth - 1) * 16}px` }">
+  <div class="flex mb-5 animate-fade-up" :style="{ marginLeft: `${(props.lane.depth - 1) * 16}px` }">
     <!-- 子 agent 头像（区别于顶层助手的 K） -->
     <div
-      class="w-6 h-6 rounded-full bg-gradient-to-br from-emerald-500/80 to-teal-500/80 flex items-center justify-center text-white shrink-0 mr-2 mt-0.5 shadow shadow-emerald-500/20"
+      class="w-7 h-7 rounded-full bg-gradient-to-br from-emerald-500/80 to-teal-500/80 flex items-center justify-center text-white shrink-0 mr-2 mt-0.5 shadow-lg shadow-emerald-500/20"
     >
-      <Bot :size="13" />
+      <Bot :size="14" />
     </div>
 
     <div
-      class="flex-1 min-w-0 rounded-xl rounded-bl-sm px-3 py-2 bg-emerald-500/[0.04] border border-emerald-500/15 text-white/85"
+      class="max-w-[76%] min-w-0 rounded-2xl rounded-tl-none px-4 py-3 bg-emerald-500/[0.04] border border-emerald-500/15 text-white/85"
     >
       <!-- 参与方标题行 -->
       <div class="flex items-center gap-1.5 mb-1.5">
