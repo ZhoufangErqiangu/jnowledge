@@ -4,7 +4,6 @@ import type { TurnView } from '@/stores/chat'
 import { Sparkles } from 'lucide-vue-next'
 import MessageBubble from '@/components/chat/MessageBubble.vue'
 import AssistantTurn from '@/components/chat/AssistantTurn.vue'
-import SubAgentLaneView from '@/components/chat/SubAgentLane.vue'
 import { useAutoScroll } from '@/hooks/useAutoScroll'
 
 const props = defineProps<{
@@ -22,9 +21,9 @@ const { scroller } = useAutoScroll([
   () => last()?.subAgents.map((s) => s.text.length + s.reasoning.length).join(','),
 ])
 
-/** 顶层助手回合是否有可渲染内容（子 agent 泳道已平级独立渲染，不计入）。 */
+/** 顶层助手回合是否有可渲染内容（含子 agent 检索过程——现收进本回合的折叠盘）。 */
 function hasAssistant(t: TurnView): boolean {
-  return !!(t.text || t.reasoning || t.streaming)
+  return !!(t.text || t.reasoning || t.streaming || t.subAgents.length)
 }
 </script>
 
@@ -32,13 +31,6 @@ function hasAssistant(t: TurnView): boolean {
   <div ref="scroller" class="flex-1 overflow-y-auto px-1 py-2">
     <template v-for="t in turns" :key="t.runId">
       <MessageBubble v-if="t.user" :message="t.user" @cite="emit('cite', $event)" />
-      <!-- 子 agent 参与方泳道（DESIGN §8.9 方案 B）：与顶层助手平级的独立发言方 -->
-      <SubAgentLaneView
-        v-for="lane in t.subAgents"
-        :key="lane.runId"
-        :lane="lane"
-        @cite="emit('cite', $event)"
-      />
       <AssistantTurn v-if="hasAssistant(t)" :turn="t" @cite="emit('cite', $event)" />
     </template>
 

@@ -5,6 +5,7 @@ import MarkdownContent from '@/components/MarkdownContent.vue'
 import CitationTags from '@/components/chat/CitationTags.vue'
 import ReasoningPanel from '@/components/chat/ReasoningPanel.vue'
 import ToolTrace from '@/components/chat/ToolTrace.vue'
+import AgentTrace from '@/components/chat/AgentTrace.vue'
 
 defineProps<{ turn: TurnView }>()
 const emit = defineEmits<{ cite: [citation: Citation] }>()
@@ -27,8 +28,11 @@ const emit = defineEmits<{ cite: [citation: Citation] }>()
       <!-- 顶层 agent 自身的工具轨迹（默认折叠） -->
       <ToolTrace :tools="turn.tools" />
 
+      <!-- 子 agent 检索过程（默认折叠，DESIGN §8.9 修订：证据经纪人不再平级泳道） -->
+      <AgentTrace :sub-agents="turn.subAgents" />
+
       <!-- 顶层终答 -->
-      <div v-if="turn.text || !turn.subAgents.length" class="inline mt-1">
+      <div v-if="turn.text || turn.streaming" class="inline mt-1">
         <MarkdownContent :source="turn.text" /><span v-if="turn.streaming" class="caret-blink"
           >▍</span
         >

@@ -14,7 +14,11 @@ import {
 import { chatApi } from '@/apis/chat'
 import { agentApi } from '@/apis/agent'
 
-/** 子 agent 参与方泳道（DESIGN §8.9 方案 B）：同一 raw 模型上「轨迹/参与方」投影的一条。 */
+/**
+ * 子 agent 轨迹（同一 raw 模型上的一条投影）。
+ * §8.9 原方案 B 把它当平级「参与方泳道」渲染；自 rag_search 改为「证据经纪人」（其输出是
+ * 给父的中间原料、非用户答案）后已修订：降级为父回合里的折叠「检索过程」盘（见 AgentTrace.vue）。
+ */
 export interface SubAgentLane {
   runId: string
   agentName: string
@@ -158,13 +162,16 @@ export const useChatStore = defineStore('chat', () => {
           tools: toolsOf(r.id),
         }))
       const top = deriveRun(R)
+      // 子 agent 的调用在父 run 上也落了一条桥接 tool_result（name=子 agent 名）；
+      // 它已由「检索过程」盘（subAgents）富展示，故从父的扁平工具列表里剔除，避免双列。
+      const subAgentNames = new Set(subAgents.map((s) => s.agentName))
       return {
         runId: R,
         user,
         reasoning: top.reasoning,
         text: top.text,
         citations: finalItemOf(R)?.citations ?? [],
-        tools: toolsOf(R),
+        tools: toolsOf(R).filter((t) => !subAgentNames.has(t.name)),
         subAgents,
         streaming: top.running,
       }

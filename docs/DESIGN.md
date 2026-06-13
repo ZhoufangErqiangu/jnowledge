@@ -329,6 +329,8 @@ verdict 落 context_item 见 §8.3（第三状态首个试金石）。
 4. **（最后，达成完全对称）** reload 也下发 raw、client 投影，server 停发 `Message[]`；至此 reload 与 live 唯一区别只剩 raw 来源，投影路径彻底归一。
 
 > **✅ 已落地（2026-06-13）**：四阶段全部实现。投影下沉 `packages/shared/src/projection/userView.ts`（`projectForUser`/`ContextItemView`/`viewFromDebug`）；线格式 `RawContextStreamEvent`（`run`/`item`/`patch{runId}`/`error`）；后端 recorder 经 `ctx.sink` 发事件、`agent.service.ask` 经 `streamChannel` 推→拉、**`TopLevelAgent.stream` 删除（顶层/子 agent 收敛成对称 `drive`＝`drain(driveAndRecord)→complete`）**；`conversationDetailSchema` 改为 `{conversation, raw, runs}`，前端 `stores/chat.ts` 单一 raw 模型 + `turns` 统一派生，`AssistantTurn.vue` + `SubAgentLane.vue`（方案 B 参与方泳道）。子 agent 泳道跨刷新持久。e2e（真 LLM）验证含阶段 4 reload 对称（客户端 `projectForUser` 重建用户视图与服务端一致）。
+>
+> **⤳ 后续修订（§8.11，2026-06-14）**：「方案 B 参与方泳道」已废止——子 agent 改为父回合内的折叠「检索过程」盘（`SubAgentLane.vue` 删除）。本节其余决策（投影下沉 / 全量 raw 下发 / live≡reload）不变。
 
 ### 8.10 调试视图也下沉前端，删除后端 debug 端点（2026-06-13 增补）
 
@@ -346,3 +348,18 @@ verdict 落 context_item 见 §8.3（第三状态首个试金石）。
 为此 `projectForChat` 连同 `HISTORY_CHAR_BUDGET` 下沉 `packages/shared/src/projection/chatView.ts`（返回 `LlmViewMessage[]`），与 `projectForUser` 同址同范式；server `projection.ts` 改为再导出，保持既有导入点与单测不变。RAG 单轮退役后（§8.8）`projectForChat` 已无生产调用，纯服务于调试投影。**带工具配对的真·LLM 视图**（`projectForLlm`，依赖 infra 消息类型）仍留服务端——调试页的"推理视图"是文本近似而非真实 agent 输入，此为既有口径、未改。
 
 > **✅ 已落地（2026-06-13）**：`projectForChat`/`HISTORY_CHAR_BUDGET` 入 `packages/shared`；删除 `chat.service.getContextDebug`、`GET /conversations/:id/context/debug` 路由、`contextDebugSchema`/`ContextDebug`/`systemViewEntrySchema`/`SystemViewEntry` 契约、`chatApi.contextDebug`；`ContextDebugView` 改 `chatApi.detail` + 本地 computed 派生四视图。三包 typecheck + `projection.test.ts` 全过。至此**所有视图路径**（聊天 / 调试，live / reload）归一到"raw 真相源 + 共享纯投影"，无服务端视图聚合残留。
+
+### 8.11 消除 rag_search 与父的双重作答 + 子 agent 渲染降级为折叠检索过程（2026-06-14 增补）
+
+**问题：同一答案被写约 1.5 遍。** 实测一条对话（首问"系统架构分几块"）发现：`rag_search` 子 agent 与顶层 `assistant` **都是"答案作者"人设**（同 `standard` 档），子 agent 先写出一篇 ~3967 字带 `[序号]` 出处的成文答案（internal，付费即弃），父再把它**几乎逐句复述**成 ~1310 字的终答。成本浪费在两处：① 子 agent 那篇成文答案的生成；② 父读入 4437 字 + 重写。根因是**职责重叠**——检索子 agent 越界做了"面向用户作答"，而那本是顶层唯一该做的事。
+
+> **原则：作者权收敛到一处；子 agent 是能力提供方，不是作者。** 工具 / 子 agent 供"证据 / 能力"，**组织成文回答只发生在顶层一处**。`rag_search` 的价值是**检索编排 + 压缩**（内部读 ~30k 原始 chunk → 压成要点），这个保留；但其产物形态从"成文答案"改为"证据要点"。
+
+**两项后端改动（成本）：**
+
+1. **C — `rag_search` 常关 thinking。** `AgentDef` 增 `thinking?` 字段（persona 级声明）；`RagSearchAgent.persona.thinking = false`。检索 + 归纳是机械活，无需 CoT；DeepSeek **默认开启** thinking，`false` → `{thinking:{type:'disabled'}}` 真关（`providers/deepseek.ts`），省掉每次检索的 CoT token。顶层 `assistant` 的 thinking 仍由用户每轮经构造期 opts 决定，不写进 persona。
+2. **A — `rag_search` 从"答案作者"改为"证据经纪人"。** persona 改为「只列带 `[序号]` 出处的**证据要点**，不写开场白 / 小标题 / 结论，不组织成对用户问题的成文回答」；父 persona 改为「rag_search 返回的是证据要点（非成文答案），据此**自行组织**作答、勿照搬复述」。作者权收敛父一处，子 agent 退化为压缩 + 检索编排层。文档脚注（涉及文档 `document_id`）保留。
+
+**一项前端改动（呈现）——废止 §8.9 方案 B：** A 把子 agent 的输出重定义为"给父的中间原料、非用户答案"，于是 §8.9 把它当**平级参与方泳道、默认展开**渲染的前提不再成立——用户会看到"证据要点"与"父终答"两块**同批事实**，既冗余又过载（且头一块本不该给用户看）。故子 agent 渲染**降级**为顶层回合内的一条**折叠「检索过程」盘**（`AgentTrace.vue`，默认折叠、可展开看内部工具 + 证据要点 + 在途态），`SubAgentLane.vue` 删除。父的扁平工具列表里剔除"子 agent 桥接 `tool_result`"（其 `name` = 子 agent 名）避免双列。首屏每个回合只剩"用户气泡 → 父终答 + 引用标签"；机器活全部折叠，透明度不丢（证据出处亦可经父终答的 `[n]` 引用标签查看）。这是**前端投影的选择**（§8.9 决策 2：完整 raw 已下发，渲染与否由前端决定），未动后端数据。
+
+> **✅ 已落地（2026-06-14）**：`AgentDef.thinking?`；`ragSearchAgent.ts`（thinking:false + 证据经纪人 persona）；`topLevelAgent.ts`（父 persona 据证据组织答案）；前端 `AgentTrace.vue`（新）/ `AssistantTurn.vue` / `MessageList.vue` / `stores/chat.ts`（桥接工具去重 + 接口注释修订），删 `SubAgentLane.vue`。server typecheck + web vue-tsc 全过。实测响应明显变快。
