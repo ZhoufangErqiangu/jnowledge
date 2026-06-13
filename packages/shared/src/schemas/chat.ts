@@ -108,40 +108,6 @@ export const agentRunNodeSchema = z.object({
 export type AgentRunNode = z.infer<typeof agentRunNodeSchema>
 
 /**
- * system 输入快照条目（§14.5 / DESIGN §8.2）：发给模型的 system 内容随轮快照落库
- * （internal），debug 直接读快照——不事后重算（assembler/模板是会迭代的代码，重算随版本漂移）。
- * 一轮可有多条：`stage='system'` 为稳定前缀（缓存友好、置于消息序最前），
- * `stage='scope'` 为易变作用域后缀（库列表等，置于历史之后、贴最新 user 轮，避免污染前缀缓存）。
- * runId 为 null 表示历史遗留 / 非 agent 路径。
- */
-export const systemViewEntrySchema = z.object({
-  runId: uuidSchema.nullable(),
-  label: z.string(),
-  stage: z.enum(['system', 'scope']),
-  content: z.string(),
-})
-export type SystemViewEntry = z.infer<typeof systemViewEntrySchema>
-
-/**
- * 「一源三视图」调试载荷：同一份原始上下文（raw）派生出
- * 推理视图（llmView，喂给 LLM）与用户视图（userView，前端可见聊天）。
- */
-export const contextDebugSchema = z.object({
-  conversation: conversationSchema,
-  /** 原始上下文：context_items 全量、按 (created_at,id) 全序，未过滤。 */
-  raw: z.array(contextItemDebugSchema),
-  /** run 树：本会话全部 agent_runs（含 parentRunId），前端据此把 raw 按 run 分组并表达父子。 */
-  runs: z.array(agentRunNodeSchema),
-  /** system prompt 重建：按确定性 facts 重算各路径/各 run 的实际 system（不入库，纯函数派生）。 */
-  systemView: z.array(systemViewEntrySchema),
-  /** 推理视图：projectForChat 派生的跨轮历史（当轮检索资料于请求时注入，不在此列）。 */
-  llmView: z.array(llmViewMessageSchema),
-  /** 用户视图：projectForUser 派生的可见聊天记录。 */
-  userView: z.array(messageSchema),
-})
-export type ContextDebug = z.infer<typeof contextDebugSchema>
-
-/**
  * 会话详情（DESIGN §8.9，阶段 4 完全对称）：服务端只下发**原始上下文 + run 树**，
  * 前端跑共享投影（projectForUser）派生用户消息、另一投影派生子 agent 参与方泳道——
  * 与 live 流投影同一份 raw，reload 与 live 无法发散。server 不再下发 Message[]。

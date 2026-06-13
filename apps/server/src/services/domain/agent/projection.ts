@@ -1,10 +1,16 @@
-import { type ContextItemDebug, type ContextItemView, projectForUser } from '@jnowledge/shared'
+import {
+  type ContextItemDebug,
+  type ContextItemView,
+  projectForChat,
+  projectForUser,
+} from '@jnowledge/shared'
 import type { ContextItemRow } from '../../../models/contextItem.repo.js'
-import type { AgentTurnMessage, ChatMessage } from '../../infra/llm/types.js'
+import type { AgentTurnMessage } from '../../infra/llm/types.js'
 
-// projectForUser + ContextItemView 已下沉 @jnowledge/shared（DESIGN §8.9，server/client 共用单一投影）；
-// 此处再导出，保持既有 `from './projection.js'` 导入点不变。LLM 视图投影（依赖 infra 消息类型）仍留本文件。
-export { projectForUser }
+// projectForUser / projectForChat + ContextItemView 已下沉 @jnowledge/shared（DESIGN §8.9，
+// server/client 共用单一投影）；此处再导出，保持既有 `from './projection.js'` 导入点不变。
+// 带工具配对的真·LLM 视图投影（projectForLlm，依赖 infra 消息类型）仍留本文件。
+export { projectForChat, projectForUser }
 export type { ContextItemView }
 
 /**
@@ -28,7 +34,7 @@ export type { ContextItemView }
 
 /**
  * Kysely 行 → 原始上下文线格式条目（ContextItemDebug）：未过滤、含 meta/flags/runId，
- * SSE 流（recorder emit）与 getContextDebug 的 raw 共用此映射，保证 live 条目与 DB 回放同形。
+ * SSE 流（recorder emit）与会话详情（getConversation）的 raw 共用此映射，保证 live 条目与 DB 回放同形。
  */
 export function toContextItemDebug(r: ContextItemRow): ContextItemDebug {
   return {
@@ -58,44 +64,6 @@ export function toContextItemView(r: ContextItemRow): ContextItemView {
     flags: r.flags ?? { state: 'active' },
     createdAt: r.created_at.toISOString(),
   }
-}
-
-/** 历史里可进 LLM 的「人类对话」对（user/assistant 文本），已按 flag 与空文本过滤。 */
-interface HistoryTurn {
-  role: 'user' | 'assistant'
-  content: string
-}
-
-function historyTurns(items: ContextItemView[]): HistoryTurn[] {
-  const turns: HistoryTurn[] = []
-  for (const it of items) {
-    // 只有 active 进 LLM 视图；hidden（人工降级）与 internal（系统子推理留痕）一律排除。
-    if (it.flags.state !== 'active') continue
-    if (it.kind === 'user') {
-      turns.push({ role: 'user', content: it.content })
-    } else if (it.kind === 'assistant') {
-      // 强制剥离 toolCalls：只取文本。空文本（纯工具调用轮）跳过。
-      if (it.content.length > 0) turns.push({ role: 'assistant', content: it.content })
-    }
-    // tool_result：文本视图不回放（projectForChat 用）。
-  }
-  return turns
-}
-
-/**
- * token 预算裁剪（按字符近似）：从最新往旧累加，超预算则丢弃更旧的历史。
- * system 由调用方前置、不计入此预算。
- */
-function trimByBudget<T extends { content: string }>(turns: T[], budget: number): T[] {
-  let used = 0
-  const kept: T[] = []
-  for (let i = turns.length - 1; i >= 0; i--) {
-    const turn = turns[i]!
-    used += turn.content.length
-    if (used > budget && kept.length > 0) break
-    kept.push(turn)
-  }
-  return kept.reverse()
 }
 
 /**
@@ -211,9 +179,4 @@ export function projectForLlm(
     })
   }
   return messages
-}
-
-/** LLM 视图（RAG 单轮 / 调试推理视图）：仅 user/assistant 文本（不含 system、不含工具回合）。 */
-export function projectForChat(items: ContextItemView[], budget: number): ChatMessage[] {
-  return trimByBudget(historyTurns(items), budget)
 }

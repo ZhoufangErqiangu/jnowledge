@@ -1,5 +1,4 @@
 import type {
-  ContextDebug,
   Conversation,
   ConversationDetail,
   CreateConversationRequest,
@@ -22,10 +21,5 @@ export const chatApi = {
   },
   async remove(id: string): Promise<void> {
     await http.delete(`/conversations/${id}`)
-  },
-  /** 调试：原始上下文 + 派生的推理视图 / 用户视图。 */
-  async contextDebug(id: string): Promise<ContextDebug> {
-    const { data } = await http.get<ContextDebug>(`/conversations/${id}/context/debug`)
-    return data
   },
 }

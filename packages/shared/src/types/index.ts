@@ -42,8 +42,6 @@ export type {
   ContextItemDebug,
   LlmViewMessage,
   AgentRunNode,
-  SystemViewEntry,
-  ContextDebug,
   RawContextStreamEvent,
 } from '../schemas/chat.js'
 export type { AgentRun, AgentStep, AgentAskRequest } from '../schemas/agent.js'

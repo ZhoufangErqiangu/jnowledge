@@ -2,7 +2,8 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, ChevronDown, Info } from 'lucide-vue-next'
-import type { ContextDebug, ContextItemDebug } from '@jnowledge/shared'
+import type { ConversationDetail, ContextItemDebug } from '@jnowledge/shared'
+import { projectForChat, projectForUser, viewFromDebug } from '@jnowledge/shared'
 import { chatApi } from '@/apis/chat'
 import { useApiAction } from '@/hooks/useApiAction'
 import Button from '@/components/ui/Button.vue'
@@ -17,19 +18,42 @@ const router = useRouter()
 const { run } = useApiAction()
 
 const conversationId = route.params.id as string
-const data = ref<ContextDebug | null>(null)
+// 完全前端派生（DESIGN §8.9）：只取「原始上下文 + run 树」，四视图均由共享纯投影从 raw 派生——
+// 与聊天页 live 流同一份 raw、同一组投影，无需后端 debug 端点。
+const data = ref<ConversationDetail | null>(null)
 
 onMounted(() =>
   run(async () => {
-    data.value = await chatApi.contextDebug(conversationId)
+    data.value = await chatApi.detail(conversationId)
   }, '加载调试上下文失败'),
 )
 
 const raw = computed(() => data.value?.raw ?? [])
 const runs = computed(() => data.value?.runs ?? [])
-const systemView = computed(() => data.value?.systemView ?? [])
-const llmView = computed(() => data.value?.llmView ?? [])
-const userView = computed(() => data.value?.userView ?? [])
+/** 投影输入：raw 线格式 → ContextItemView（共享投影的入参）。 */
+const views = computed(() => raw.value.map(viewFromDebug))
+
+/** system 输入快照（忠实于发送当时）：raw 中 stage=system/scope 的 internal 留痕，按落库序。 */
+interface SystemSnapshot {
+  runId: string | null
+  label: string
+  stage: 'system' | 'scope'
+  content: string
+}
+const systemView = computed<SystemSnapshot[]>(() =>
+  raw.value
+    .filter((it) => it.meta.stage === 'system' || it.meta.stage === 'scope')
+    .map((it) => ({
+      runId: it.runId,
+      label: agentNameOf(it.runId) ?? 'agent',
+      stage: it.meta.stage as 'system' | 'scope',
+      content: it.content,
+    })),
+)
+/** 推理视图：共享 projectForChat 派生的跨轮文本历史。 */
+const llmView = computed(() => projectForChat(views.value))
+/** 用户视图：共享 projectForUser 派生的可见聊天记录（与聊天页同源）。 */
+const userView = computed(() => projectForUser(views.value))
 
 const KIND_CLS: Record<ContextItemDebug['kind'], string> = {
   user:        'bg-brand/15 text-brand/90 border-brand/25',
