@@ -3,7 +3,6 @@ import type { Citation, Message } from '@jnowledge/shared'
 import MarkdownContent from '@/components/MarkdownContent.vue'
 import CitationTags from '@/components/chat/CitationTags.vue'
 import ReasoningPanel from '@/components/chat/ReasoningPanel.vue'
-import { formatDate } from '@/utils/format'
 import { cn } from '@/lib/utils'
 
 defineProps<{ message: Message }>()
@@ -39,16 +38,6 @@ const emit = defineEmits<{ cite: [citation: Citation] }>()
         {{ message.content }}
       </div>
       <CitationTags :citations="message.citations" @select="emit('cite', $event)" />
-      <div
-        :class="
-          cn(
-            'text-[10px] mt-2',
-            message.role === 'user' ? 'text-white/60' : 'text-white/30',
-          )
-        "
-      >
-        {{ formatDate(message.createdAt) }}
-      </div>
     </div>
   </div>
 </template>
