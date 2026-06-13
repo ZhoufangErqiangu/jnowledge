@@ -25,7 +25,7 @@ function item(
     content,
     citations: [],
     flags: { state },
-    createdAt: new Date(seq * 1000),
+    createdAt: new Date(seq * 1000).toISOString(),
   }
 }
 
@@ -69,7 +69,7 @@ function itemFull(p: Partial<ContextItemView> & { kind: ContextItemView['kind'];
     conversationId: 'c1',
     citations: [],
     flags: { state: 'active' },
-    createdAt: new Date(seq * 1000),
+    createdAt: new Date(seq * 1000).toISOString(),
     ...p,
   }
 }

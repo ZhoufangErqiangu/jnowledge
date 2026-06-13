@@ -62,12 +62,6 @@ export const askRequestSchema = z.object({
 })
 export type AskRequest = z.infer<typeof askRequestSchema>
 
-/** 会话详情：会话 + 全部消息。 */
-export const conversationDetailSchema = z.object({
-  conversation: conversationSchema,
-  messages: z.array(messageSchema),
-})
-export type ConversationDetail = z.infer<typeof conversationDetailSchema>
 
 /**
  * 调试视图：原始上下文（context_items 全量条目，未经投影过滤）。
@@ -148,6 +142,20 @@ export const contextDebugSchema = z.object({
 export type ContextDebug = z.infer<typeof contextDebugSchema>
 
 /**
+ * 会话详情（DESIGN §8.9，阶段 4 完全对称）：服务端只下发**原始上下文 + run 树**，
+ * 前端跑共享投影（projectForUser）派生用户消息、另一投影派生子 agent 参与方泳道——
+ * 与 live 流投影同一份 raw，reload 与 live 无法发散。server 不再下发 Message[]。
+ */
+export const conversationDetailSchema = z.object({
+  conversation: conversationSchema,
+  /** 原始上下文：context_items 全量、按 (created_at,id) 全序，未过滤（含 internal 子 agent 条目）。 */
+  raw: z.array(contextItemDebugSchema),
+  /** run 树：本会话全部 agent_runs（含 parentRunId），前端据此重建子 agent 嵌套泳道。 */
+  runs: z.array(agentRunNodeSchema),
+})
+export type ConversationDetail = z.infer<typeof conversationDetailSchema>
+
+/**
  * SSE 事件载荷（前端解析 data: <json>）。type 区分：
  * - token：增量正文；reasoning：思考过程增量（thinking 开时）；
  * - citations：检索引用列表（生成前或末尾一次性下发）；
@@ -158,4 +166,21 @@ export type ChatStreamEvent =
   | { type: 'reasoning'; delta: string }
   | { type: 'citations'; citations: Citation[] }
   | { type: 'done'; messageId: string }
+  | { type: 'error'; message: string }
+
+/**
+ * 原始上下文流事件（DESIGN §8.9）：**流式传输 = recorder 每次写入的镜像**。
+ * 前端按到达序累积出与 DB 回放同构的 raw 模型（ContextItemView[]），再跑共享投影
+ * （projectForUser 等）派生用户视图 / 轨迹 / 子 agent 参与方泳道——live 与 reload 投影同一序列、无法发散。
+ *
+ * - `item`：一个 context 条目落定（与 ContextItemDebug 同形，含 internal 的子 agent 条目）；
+ *   citations 随 assistant 落定条目携带；messageId 即该 item 的 id（旧 citations/done 事件就此退役）。
+ * - `patch`：当前未落定条目的增量（落定前的 text / reasoning token）；`runId` 显式标明归属 run（含子 agent）。
+ * - `run`：run 树节点（顶层 / 子 agent run 创建时各下发一次），前端据 parentRunId 建嵌套。
+ * - `error`：运行失败。
+ */
+export type RawContextStreamEvent =
+  | { type: 'item'; item: ContextItemDebug }
+  | { type: 'patch'; runId: string; field: 'text' | 'reasoning'; delta: string }
+  | { type: 'run'; node: AgentRunNode }
   | { type: 'error'; message: string }

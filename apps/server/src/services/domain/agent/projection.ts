@@ -1,6 +1,11 @@
-import type { Citation, ContextItemKind, Message } from '@jnowledge/shared'
-import type { ContextItemFlags, ContextItemRow } from '../../../models/contextItem.repo.js'
-import type { AgentTurnMessage, ChatMessage, ToolCall } from '../../infra/llm/types.js'
+import { type ContextItemDebug, type ContextItemView, projectForUser } from '@jnowledge/shared'
+import type { ContextItemRow } from '../../../models/contextItem.repo.js'
+import type { AgentTurnMessage, ChatMessage } from '../../infra/llm/types.js'
+
+// projectForUser + ContextItemView 已下沉 @jnowledge/shared（DESIGN §8.9，server/client 共用单一投影）；
+// 此处再导出，保持既有 `from './projection.js'` 导入点不变。LLM 视图投影（依赖 infra 消息类型）仍留本文件。
+export { projectForUser }
+export type { ContextItemView }
 
 /**
  * 投影引擎：把全量上下文事件日志（context_items）派生成两类视图，均为纯函数、可单测。
@@ -21,24 +26,25 @@ import type { AgentTurnMessage, ChatMessage, ToolCall } from '../../infra/llm/ty
  * marker 重映射（成本过高）。
  */
 
-/** 投影输入：与 Kysely Row 解耦的最小视图（camelCase）。 */
-export interface ContextItemView {
-  id: string
-  conversationId: string
-  kind: ContextItemKind
-  content: string
-  citations: Citation[]
-  /** assistant 轮思考过程（meta.reasoning），仅用户视图展示用。 */
-  reasoning?: string
-  /** assistant 轮本轮发起的工具调用（meta.toolCalls），跨轮无损重建用。 */
-  toolCalls?: ToolCall[]
-  /** tool_result 对应的工具调用 id（meta.toolCallId），跨轮重建配对用。 */
-  toolCallId?: string
-  flags: ContextItemFlags
-  createdAt: Date
+/**
+ * Kysely 行 → 原始上下文线格式条目（ContextItemDebug）：未过滤、含 meta/flags/runId，
+ * SSE 流（recorder emit）与 getContextDebug 的 raw 共用此映射，保证 live 条目与 DB 回放同形。
+ */
+export function toContextItemDebug(r: ContextItemRow): ContextItemDebug {
+  return {
+    id: r.id,
+    conversationId: r.conversation_id,
+    runId: r.run_id,
+    kind: r.kind,
+    content: r.content,
+    citations: r.citations ?? [],
+    meta: (r.meta ?? {}) as Record<string, unknown>,
+    flags: r.flags ?? { state: 'active' },
+    createdAt: r.created_at.toISOString(),
+  }
 }
 
-/** Kysely 行 → 投影输入视图（jsonb 列已由 pg 解析为 JS 值）。 */
+/** Kysely 行 → 投影输入视图（jsonb 列已由 pg 解析为 JS 值）。createdAt 转 ISO 字符串（跨平台契约）。 */
 export function toContextItemView(r: ContextItemRow): ContextItemView {
   return {
     id: r.id,
@@ -50,7 +56,7 @@ export function toContextItemView(r: ContextItemRow): ContextItemView {
     ...(r.meta?.toolCalls ? { toolCalls: r.meta.toolCalls } : {}),
     ...(r.meta?.toolCallId ? { toolCallId: r.meta.toolCallId } : {}),
     flags: r.flags ?? { state: 'active' },
-    createdAt: r.created_at,
+    createdAt: r.created_at.toISOString(),
   }
 }
 
@@ -210,24 +216,4 @@ export function projectForLlm(
 /** LLM 视图（RAG 单轮 / 调试推理视图）：仅 user/assistant 文本（不含 system、不含工具回合）。 */
 export function projectForChat(items: ContextItemView[], budget: number): ChatMessage[] {
   return trimByBudget(historyTurns(items), budget)
-}
-
-/** 用户视图：active 的 user/assistant → 现有 Message DTO（前端不变）。tool_result 不可见。 */
-export function projectForUser(items: ContextItemView[]): Message[] {
-  const messages: Message[] = []
-  for (const it of items) {
-    // 同 historyTurns：只有 active 进用户视图；hidden / internal 均不可见。
-    if (it.flags.state !== 'active') continue
-    if (it.kind !== 'user' && it.kind !== 'assistant') continue
-    messages.push({
-      id: it.id,
-      conversationId: it.conversationId,
-      role: it.kind,
-      content: it.content,
-      ...(it.reasoning ? { reasoning: it.reasoning } : {}),
-      citations: it.citations,
-      createdAt: it.createdAt.toISOString(),
-    })
-  }
-  return messages
 }

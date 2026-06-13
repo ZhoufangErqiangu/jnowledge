@@ -43,6 +43,7 @@ export abstract class RecordedAgent extends Agent {
         conversationId: ctx.conversationId,
         runId: ctx.runId,
         state: this.recordState,
+        ...(ctx.sink ? { sink: ctx.sink } : {}),
       })
     }
     return this.recorder
@@ -68,6 +69,7 @@ export abstract class RecordedAgent extends Agent {
           break
         case 'text':
           answer += ev.delta
+          recorder.noteText(ev.delta)
           break
         case 'step_start':
           recorder.noteInput(ev.seq, ev.input)

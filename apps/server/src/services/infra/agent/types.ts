@@ -1,5 +1,5 @@
 import type { z } from 'zod'
-import type { Citation, LlmTier } from '@jnowledge/shared'
+import type { Citation, LlmTier, RawContextStreamEvent } from '@jnowledge/shared'
 import type { Logger } from '../../../logger.js'
 import type { LLMClient, LlmCallStat, ToolCall } from '../llm/types.js'
 
@@ -90,9 +90,15 @@ export interface RunContext {
   logger: Logger
   /** 全 run 共享的引用聚合器；工具向其追加并分配全局 marker。 */
   citations: Citation[]
+  /**
+   * 原始上下文事件汇（DESIGN §8.9）：recorder 每次写 context_item / 累积增量时经此推 item/patch，
+   * 子 agent 工具创建子 run 时推 run 节点。**顶层与子 run 共享同一 sink**（childCtx 经 spread 继承），
+   * 子 agent 事件因此在父 invokeTool 阻塞期间自然上浮到 SSE。缺省（如 e2e/测试驱动）不下发，纯落库。
+   */
+  sink?: (ev: RawContextStreamEvent) => void
 }
 
-/** runtime 产出的事件（service 翻成 AgentStreamEvent 并落 context_items）。 */
+/** runtime 产出的事件（RecordedAgent.driveAndRecord 据此落 context_items；recorder 再经 ctx.sink 发 item/patch）。 */
 export type AgentEvent =
   /**
    * 中间 assistant 轮（发起了工具调用）。service 据此落一条 kind=assistant 的 context_item，

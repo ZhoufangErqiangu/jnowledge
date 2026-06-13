@@ -82,15 +82,7 @@ async function send() {
       class="flex flex-col h-full rounded-xl border border-white/[0.06] bg-surface/60 overflow-hidden"
     >
       <div class="flex-1 flex flex-col px-4 py-4 overflow-hidden">
-        <MessageList
-          :messages="chat.messages"
-          :streaming="chat.streaming"
-          :stream-text="chat.streamText"
-          :stream-reasoning="chat.streamReasoning"
-          :stream-citations="chat.streamCitations"
-          :stream-steps="chat.streamSteps"
-          @cite="gotoCitation"
-        />
+        <MessageList :turns="chat.turns" :streaming="chat.streaming" @cite="gotoCitation" />
         <ChatComposer
           v-model="input"
           v-model:tier="chat.tier"

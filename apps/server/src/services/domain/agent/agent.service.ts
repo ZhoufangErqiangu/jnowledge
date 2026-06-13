@@ -1,9 +1,11 @@
 import { uuidv7 } from 'uuidv7'
-import { ERROR_CODES, type AgentStreamEvent, type MainReasoningTier } from '@jnowledge/shared'
+import { ERROR_CODES, type MainReasoningTier, type RawContextStreamEvent } from '@jnowledge/shared'
 import type { Models } from '../../../models/index.js'
+import type { ContextItemRow } from '../../../models/contextItem.repo.js'
 import { type RunContext, createToolRegistry } from '../../infra/agent/index.js'
 import { assembleSystemPrompt, buildScopeSuffix } from './systemPrompt.js'
-import { projectForLlm, toContextItemView } from './projection.js'
+import { projectForLlm, toContextItemDebug, toContextItemView } from './projection.js'
+import { createStreamChannel } from './streamChannel.js'
 import { createOperationAuditor } from './operationAuditor.js'
 import { createRelevanceFilter } from './relevanceFilter.js'
 import { createGetDocumentTool } from './tools/getDocument.js'
@@ -39,13 +41,16 @@ export interface AskOptions {
 }
 
 export interface AgentService {
-  /** Agent 流式问答：ReAct 自主编排检索/读文档；产 SSE 轨迹 + 答复；落 run/steps/message。 */
+  /**
+   * Agent 流式问答：ReAct 自主编排检索/读文档；产**原始上下文事件流**（item/patch/run，DESIGN §8.9）
+   * + 落 run/context_items。前端按到达序累积 raw、跑共享投影派生视图（含子 agent 参与方泳道）。
+   */
   ask(
     p: Principal,
     conversationId: string,
     question: string,
     options?: AskOptions,
-  ): AsyncIterable<AgentStreamEvent>
+  ): AsyncIterable<RawContextStreamEvent>
 }
 
 /** 单步（一次 LLM 调用）wall-clock 超时（ms）；超限即熔断该步，多步累计不受此约束。 */
@@ -125,7 +130,7 @@ export function createAgentService(deps: AgentDeps): AgentService {
     conversationId: string,
     question: string,
     options: AskOptions = {},
-  ): AsyncIterable<AgentStreamEvent> {
+  ): AsyncIterable<RawContextStreamEvent> {
     let cv
     try {
       cv = await loadWithAccess(p, conversationId, 'viewer')
@@ -196,27 +201,33 @@ export function createAgentService(deps: AgentDeps): AgentService {
       // 不靠事后重算。stage=system 为稳定前缀、stage=scope 为易变后缀。**去重（snapshot-on-change）**：
       // 内容与上次同 stage 快照一致就跳过（system/scope 多轮通常不变，逐轮重复落只是噪声）；
       // 重建第 N 轮实际 system = 取 created_at ≤ 该轮的最近一份快照（内容相同，无损）。
+      // 快照行同样入流（internal）——live 流与 DB raw 同构（DESIGN §8.9，决定2：完整 raw 含 internal）。
+      const snapshotRows: ContextItemRow[] = []
       if (system !== lastSystemSnapshot) {
-        await models.contextItems.insert({
-          id: uuidv7(),
-          conversationId,
-          runId,
-          kind: 'tool_result',
-          flags: { state: 'internal' },
-          content: system,
-          meta: { stage: 'system', name: persona.name, summary: 'agent system prompt 前缀快照' },
-        })
+        snapshotRows.push(
+          await models.contextItems.insert({
+            id: uuidv7(),
+            conversationId,
+            runId,
+            kind: 'tool_result',
+            flags: { state: 'internal' },
+            content: system,
+            meta: { stage: 'system', name: persona.name, summary: 'agent system prompt 前缀快照' },
+          }),
+        )
       }
       if (scopeSuffix && scopeSuffix !== lastScopeSnapshot) {
-        await models.contextItems.insert({
-          id: uuidv7(),
-          conversationId,
-          runId,
-          kind: 'tool_result',
-          flags: { state: 'internal' },
-          content: scopeSuffix,
-          meta: { stage: 'scope', name: persona.name, summary: 'agent 作用域后缀快照' },
-        })
+        snapshotRows.push(
+          await models.contextItems.insert({
+            id: uuidv7(),
+            conversationId,
+            runId,
+            kind: 'tool_result',
+            flags: { state: 'internal' },
+            content: scopeSuffix,
+            meta: { stage: 'scope', name: persona.name, summary: 'agent 作用域后缀快照' },
+          }),
+        )
       }
       // 本轮 user 已落库 → 投影含本轮 user；history 不含 system（由 Agent 构造期前置），
       // scopeSuffix 仍由 projectForLlm 贴在最新 user 轮之前（保前缀缓存）。
@@ -241,7 +252,36 @@ export function createAgentService(deps: AgentDeps): AgentService {
           logger,
         },
       )
-      yield* agent.stream(ctx)
+      // 推→拉接缝（DESIGN §8.9）：sink 推 item/patch/run（子 agent 在父 invokeTool 阻塞期间经同一
+      // sink 上浮），ask 从通道拉并 yield。先推起手事件（顶层 run 节点 + user 条目 + system/scope 快照），
+      // 顺序贴合落库序使 live 流与 DB 回放同构。
+      const channel = createStreamChannel<RawContextStreamEvent>()
+      ctx.sink = (ev) => channel.push(ev)
+      channel.push({
+        type: 'run',
+        node: { id: runId, parentRunId: null, agentName: persona.name, status: 'running' },
+      })
+      channel.push({ type: 'item', item: toContextItemDebug(userItem) })
+      for (const row of snapshotRows) channel.push({ type: 'item', item: toContextItemDebug(row) })
+
+      const driveTask = (async () => {
+        try {
+          await agent.drive(ctx)
+        } catch (err) {
+          const message = err instanceof Error ? err.message : '运行失败'
+          logger.error({ conversationId, runId, err }, 'agent ask 失败')
+          await models.agentRuns.fail(runId, message).catch(() => {})
+          channel.push({ type: 'error', message })
+        } finally {
+          channel.close()
+        }
+      })()
+
+      try {
+        for await (const ev of channel) yield ev
+      } finally {
+        await driveTask
+      }
     } catch (err) {
       logger.error({ conversationId, runId, err }, 'agent ask 准备失败')
       await models.agentRuns.fail(runId, err instanceof Error ? err.message : '运行失败').catch(() => {})

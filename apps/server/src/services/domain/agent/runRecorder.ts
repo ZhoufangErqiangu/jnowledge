@@ -1,11 +1,12 @@
 import { uuidv7 } from 'uuidv7'
-import type { Citation, ContextItemState } from '@jnowledge/shared'
+import type { Citation, ContextItemState, RawContextStreamEvent } from '@jnowledge/shared'
 import type {
   ContextItemMeta,
   ContextItemRepo,
   ContextItemRow,
 } from '../../../models/contextItem.repo.js'
 import type { AgentEvent, LlmCallStat } from '../../infra/agent/index.js'
+import { toContextItemDebug } from './projection.js'
 
 /**
  * RunRecorder：把一次 run 产生的 AgentEvent 落成 context_items 的「写侧」收口。
@@ -20,18 +21,30 @@ export interface RunRecorderBase {
   conversationId: string
   runId: string
   state: ContextItemState
+  /** 原始上下文事件汇（DESIGN §8.9）：每次落条目即发 item、每个增量即发 patch；缺省则纯落库。 */
+  sink?: (ev: RawContextStreamEvent) => void
 }
 
 export function createRunRecorder(contextItems: ContextItemRepo, base: RunRecorderBase) {
-  const { conversationId, runId, state } = base
+  const { conversationId, runId, state, sink } = base
   const inputBySeq = new Map<number, unknown>()
   // 本轮（当前 LLM 调用）思考过程累积；落到该轮 assistant 的 meta.reasoning 后清空。
   let pendingReasoning = ''
 
+  /** 落库行 → item 事件（与 DB 回放同形）。 */
+  const emitItem = (row: ContextItemRow): void =>
+    sink?.({ type: 'item', item: toContextItemDebug(row) })
+
   return {
-    /** 思考增量累加（落到下一条 assistant 的 meta.reasoning）。 */
+    /** 思考增量累加（落到下一条 assistant 的 meta.reasoning）+ 发 reasoning patch（落定前增量）。 */
     addReasoning(delta: string): void {
       pendingReasoning += delta
+      sink?.({ type: 'patch', runId, field: 'reasoning', delta })
+    },
+
+    /** 正文增量：仅发 text patch（落定前增量；终答内容在 finalAssistant 落库，此处不存）。 */
+    noteText(delta: string): void {
+      sink?.({ type: 'patch', runId, field: 'text', delta })
     },
 
     /** step_start 携带的工具入参——暂存，等配对的 tool_result 落库时取用。 */
@@ -46,7 +59,7 @@ export function createRunRecorder(contextItems: ContextItemRepo, base: RunRecord
         ...(pendingReasoning ? { reasoning: pendingReasoning } : {}),
         ...(ev.llm ? { llm: ev.llm } : {}),
       }
-      await contextItems.insert({
+      const row = await contextItems.insert({
         id: uuidv7(),
         conversationId,
         runId,
@@ -56,11 +69,12 @@ export function createRunRecorder(contextItems: ContextItemRepo, base: RunRecord
         ...(Object.keys(meta).length ? { meta } : {}),
       })
       pendingReasoning = ''
+      emitItem(row)
     },
 
     /** 工具结果：content 存 LLM 实际看到的字符串（往返真相源）；结构化 output/入参进 meta 供诊断。 */
     async toolResult(ev: Extract<AgentEvent, { type: 'tool_result' }>): Promise<void> {
-      await contextItems.insert({
+      const row = await contextItems.insert({
         id: uuidv7(),
         conversationId,
         runId,
@@ -78,6 +92,7 @@ export function createRunRecorder(contextItems: ContextItemRepo, base: RunRecord
           output: ev.output,
         },
       })
+      emitItem(row)
     },
 
     /** 终答 assistant 条目（带引用 + 末轮思考 + 产出该终答那次 LLM 调用的耗时/用量）；返回落库行供回填 run。 */
@@ -101,6 +116,7 @@ export function createRunRecorder(contextItems: ContextItemRepo, base: RunRecord
         ...(Object.keys(meta).length ? { meta } : {}),
       })
       pendingReasoning = ''
+      emitItem(row)
       return row
     },
   }

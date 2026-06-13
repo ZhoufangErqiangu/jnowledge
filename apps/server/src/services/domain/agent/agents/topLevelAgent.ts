@@ -1,4 +1,4 @@
-import type { AgentStreamEvent, Citation } from '@jnowledge/shared'
+import type { Citation } from '@jnowledge/shared'
 import type { AgentRunRepo } from '../../../../models/agentRun.repo.js'
 import type { ContextItemRepo } from '../../../../models/contextItem.repo.js'
 import type { ConversationRepo } from '../../../../models/conversation.repo.js'
@@ -6,7 +6,7 @@ import type { Logger } from '../../../../logger.js'
 import type { LlmTier } from '@jnowledge/shared'
 import type { AgentTurnMessage, Thinking } from '../../../infra/llm/types.js'
 import type { AgentDef, RunContext, Tool } from '../../../infra/agent/index.js'
-import { RecordedAgent } from './recordedAgent.js'
+import { RecordedAgent, drain } from './recordedAgent.js'
 
 /** 增删改工具名（按 editor 权限在工具层校验）。 */
 const WRITE_TOOL_NAMES = [
@@ -96,59 +96,26 @@ export class TopLevelAgent extends RecordedAgent {
     )
   }
 
-  /** 流式问答：驱动 ReAct + active 落库 → SSE；尾段引用校验 + 终答落库 + run/会话收口。 */
-  async *stream(ctx: RunContext): AsyncIterable<AgentStreamEvent> {
-    // 降级：未配置 chat 供应商 → 不进 ReAct（agent 需模型自主选库检索，仅提示）。
+  /**
+   * 驱动顶层一次问答：ReAct + active 落库；过程中 recorder 经 `ctx.sink` 实时发 item/patch（DESIGN §8.9）。
+   * 尾段引用校验 + 终答落库（finalAssistant 经 sink 发终答 item）+ 会话收口。不再手捏 SSE——
+   * 流式输出统一由 sink → ask 队列承载，顶层与子 agent 收敛成对称的 drain + complete。
+   * 失败抛出（由 ask 收尾：落 run=failed + 发 error 事件）。
+   */
+  async drive(ctx: RunContext): Promise<void> {
+    // 降级：未配置 chat 供应商 → 不进 ReAct（agent 需模型自主选库检索，仅提示）。终答 item 经 sink 落定。
     if (!ctx.llm.chat.configured) {
       const answer = '（未配置生成模型，助手需要生成模型才能选库检索）'
-      yield { type: 'token', delta: answer }
-      yield { type: 'citations', citations: [] }
-      const item = await this.complete(ctx, answer, [])
+      await this.complete(ctx, answer, [])
       await this.deps.conversations.touch(ctx.conversationId)
-      yield { type: 'done', messageId: item.id, runId: ctx.runId }
       return
     }
 
-    let result
-    try {
-      const gen = this.driveAndRecord(ctx)
-      for (;;) {
-        const next = await gen.next()
-        if (next.done) {
-          result = next.value
-          break
-        }
-        const ev = next.value
-        // 中间 assistant / final / error 不外发 SSE（assistant 已 active 落库，final 仅供收尾）。
-        switch (ev.type) {
-          case 'reasoning':
-            yield { type: 'reasoning', delta: ev.delta }
-            break
-          case 'text':
-            yield { type: 'token', delta: ev.delta }
-            break
-          case 'step_start':
-            yield { type: 'step_start', seq: ev.seq, kind: ev.kind, name: ev.name, input: ev.input }
-            break
-          case 'tool_result':
-            yield { type: 'tool_result', seq: ev.seq, ok: ev.ok, summary: ev.summary }
-            break
-        }
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : '运行失败'
-      this.deps.logger.error({ conversationId: ctx.conversationId, runId: ctx.runId, err }, 'agent ask 失败')
-      await this.fail(ctx, message)
-      yield { type: 'error', message }
-      return
-    }
-
-    // 引用校验 + 落库终答 assistant 条目 + 完成 run。
+    const result = await drain(this.driveAndRecord(ctx))
+    // 引用校验 + 落库终答 assistant 条目（携 citations，经 sink 发终答 item）+ 完成 run。
     const finalCitations = validateCitations(result.answer, ctx.citations)
-    yield { type: 'citations', citations: finalCitations }
-    const item = await this.complete(ctx, result.answer, finalCitations, result.finalLlm)
+    await this.complete(ctx, result.answer, finalCitations, result.finalLlm)
     await this.deps.conversations.touch(ctx.conversationId)
-    yield { type: 'done', messageId: item.id, runId: ctx.runId }
   }
 }
 

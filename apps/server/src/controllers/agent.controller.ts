@@ -1,6 +1,6 @@
 import Router from '@koa/router'
 import { agentAskRequestSchema } from '@jnowledge/shared'
-import type { AgentStreamEvent } from '@jnowledge/shared'
+import type { RawContextStreamEvent } from '@jnowledge/shared'
 import type { Container } from '../container.js'
 import { type AppState, requirePrincipal } from '../http/state.js'
 
@@ -10,8 +10,9 @@ export function createAgentController(c: Container): Router<AppState> {
 
   router.use(c.requireAuth)
 
-  // Agent 问答（SSE 流式）。与 RAG 的 /ask 并存，互不影响。
-  // step_start/tool_result（执行轨迹）→ reasoning/token（增量）→ citations → done；出错走 error 事件。
+  // Agent 问答（SSE 流式，DESIGN §8.9）：下发**原始上下文事件流**——
+  // run（run 树节点）/ item（条目落定，含子 agent internal）/ patch（落定前 text·reasoning 增量）；出错走 error。
+  // 前端按到达序累积 raw、跑共享投影派生视图（用户消息 + 子 agent 参与方泳道）。
   router.post('/conversations/:id/agent', async (ctx) => {
     const req = agentAskRequestSchema.parse(ctx.request.body)
     const p = requirePrincipal(ctx.state)
@@ -27,7 +28,7 @@ export function createAgentController(c: Container): Router<AppState> {
     ctx.respond = false
 
     const res = ctx.res
-    const send = (ev: AgentStreamEvent) => res.write(`data: ${JSON.stringify(ev)}\n\n`)
+    const send = (ev: RawContextStreamEvent) => res.write(`data: ${JSON.stringify(ev)}\n\n`)
 
     try {
       for await (const ev of agent.ask(p, ctx.params.id!, req.question, {

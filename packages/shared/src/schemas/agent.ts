@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { AGENT_RUN_STATUSES, AGENT_STEP_KINDS, MAIN_REASONING_TIERS } from '../constants/enums.js'
 import { isoDateSchema, uuidSchema } from './common.js'
-import { citationSchema, type Citation } from './chat.js'
+import { citationSchema } from './chat.js'
 
 /**
  * 四期 Agent：一次 agent 运行（run）+ 其执行轨迹（steps）。
@@ -50,18 +50,5 @@ export type AgentAskRequest = z.infer<typeof agentAskRequestSchema>
 /** 让 citationSchema 进入打包产物，并供运行期校验复用。 */
 export const agentCitationSchema = citationSchema
 
-/**
- * Agent SSE 事件载荷（前端解析 data: <json>）。是 ChatStreamEvent 的超集：
- * - step_start / tool_result：执行轨迹（与 agent_steps 同形，现场流 + 落库）；
- * - reasoning / token：思考过程 / 最终答复增量（仅最终答复流 token）；
- * - citations：聚合自各工具命中的引用列表；
- * - done：结束（终答 message id + run id）；error：错误。
- */
-export type AgentStreamEvent =
-  | { type: 'step_start'; seq: number; kind: 'tool' | 'agent'; name: string; input: unknown }
-  | { type: 'tool_result'; seq: number; ok: boolean; summary: string }
-  | { type: 'reasoning'; delta: string }
-  | { type: 'token'; delta: string }
-  | { type: 'citations'; citations: Citation[] }
-  | { type: 'done'; messageId: string; runId: string }
-  | { type: 'error'; message: string }
+// Agent SSE 载荷已迁移为「原始上下文事件流」RawContextStreamEvent（见 schemas/chat.ts，DESIGN §8.9）；
+// 旧的有损 AgentStreamEvent（step_start/tool_result/token/citations/done）已退役删除。

@@ -1,5 +1,6 @@
 import '../loadEnv.js'
 import { sql } from 'kysely'
+import { type RawContextStreamEvent, projectForUser, viewFromDebug } from '@jnowledge/shared'
 import { loadConfig } from '../config/index.js'
 import { buildContainer } from '../container.js'
 import type { Principal } from '../services/domain/collection.service.js'
@@ -12,12 +13,20 @@ import type { Principal } from '../services/domain/collection.service.js'
  *
  * 运行：pnpm --filter @jnowledge/server exec tsx src/scripts/e2eContextMemory.ts
  */
-async function drain(stream: AsyncIterable<{ type: string; delta?: string; message?: string }>) {
+// 新 wire 格式（DESIGN §8.9）：答案以顶层「终答 item」（active assistant、无 toolCalls）的 content 为准。
+async function drain(stream: AsyncIterable<RawContextStreamEvent>) {
   let answer = ''
   let error: string | undefined
   for await (const ev of stream) {
-    if (ev.type === 'token') answer += ev.delta ?? ''
-    else if (ev.type === 'error') error = ev.message
+    if (ev.type === 'item') {
+      const { item } = ev
+      const toolCalls = (item.meta as { toolCalls?: unknown[] }).toolCalls
+      if (item.kind === 'assistant' && item.flags.state === 'active' && !(toolCalls?.length ?? 0)) {
+        answer = item.content
+      }
+    } else if (ev.type === 'error') {
+      error = ev.message
+    }
   }
   return { answer, error }
 }
@@ -68,6 +77,19 @@ async function main() {
   const remembered = turn2.answer.includes(SECRET)
   console.log(`\n${remembered ? '✓ PASS' : '✗ FAIL'} — 第二轮${remembered ? '记得' : '没记住'}第一轮的事实（${SECRET}）`)
 
+  // 阶段 4（完全对称）：reload 下发 raw + runs；前端跑共享 projectForUser 派生用户视图。
+  const detail = await services.chat.getConversation(principal, cv.id)
+  const clientMsgs = projectForUser(detail.raw.map(viewFromDebug))
+  const reloadOk =
+    detail.raw.length > 0 &&
+    detail.runs.length > 0 &&
+    clientMsgs.filter((m) => m.role === 'user').length === 2 &&
+    clientMsgs.some((m) => m.role === 'assistant' && m.content.includes(SECRET))
+  console.log(
+    `· reload 对称：raw×${detail.raw.length} runs×${detail.runs.length} → 客户端投影 ${clientMsgs.length} 条消息（user/assistant 各 ${clientMsgs.filter((m) => m.role === 'user').length}/${clientMsgs.filter((m) => m.role === 'assistant').length}）`,
+  )
+  console.log(`${reloadOk ? '✓ PASS' : '✗ FAIL'} — getConversation 下发 raw+runs，共享投影重建用户视图含事实`)
+
   // ── 场景 B：工具调用轮的全量持久化 + 跨轮投影不被工具轮破坏 ──
   console.log('\n──────── 场景 B：工具轮持久化 ────────')
   const cvb = await services.chat.createConversation(principal, { title: 'E2E 工具轮测试' })
@@ -106,7 +128,7 @@ async function main() {
   await services.chat.removeConversation(principal, cv.id)
   await services.chat.removeConversation(principal, cvb.id)
   await db.destroy()
-  process.exit(remembered && toolTurnOk ? 0 : 1)
+  process.exit(remembered && toolTurnOk && reloadOk ? 0 : 1)
 }
 
 main().catch(async (err) => {

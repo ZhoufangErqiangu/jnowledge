@@ -7,7 +7,12 @@ import {
   type CreateConversationRequest,
 } from '@jnowledge/shared'
 import type { Models } from '../../models/index.js'
-import { projectForChat, projectForUser, toContextItemView } from './agent/projection.js'
+import {
+  projectForChat,
+  projectForUser,
+  toContextItemDebug,
+  toContextItemView,
+} from './agent/projection.js'
 import { toConversation } from '../../models/mappers.js'
 import type { CollectionService, Principal } from './collection.service.js'
 import { AppError } from '../../errors.js'
@@ -64,11 +69,19 @@ export function createChatService(deps: ChatDeps): ChatService {
     },
 
     async getConversation(p, conversationId) {
+      // 完全对称（DESIGN §8.9 阶段 4）：下发原始上下文 + run 树，前端跑共享投影派生视图；不再投影成 Message[]。
       const cv = await loadWithAccess(p, conversationId, 'viewer')
-      const items = await models.contextItems.listByConversation(conversationId)
+      const rows = await models.contextItems.listByConversation(conversationId)
+      const runs = (await models.agentRuns.listByConversation(conversationId)).map((r) => ({
+        id: r.id,
+        parentRunId: r.parent_run_id,
+        agentName: r.agent_name,
+        status: r.status,
+      }))
       return {
         conversation: toConversation(cv),
-        messages: projectForUser(items.map(toContextItemView)),
+        raw: rows.map(toContextItemDebug),
+        runs,
       }
     },
 
@@ -101,17 +114,7 @@ export function createChatService(deps: ChatDeps): ChatService {
         conversation: toConversation(cv),
         runs,
         systemView,
-        raw: rows.map((r) => ({
-          id: r.id,
-          conversationId: r.conversation_id,
-          runId: r.run_id,
-          kind: r.kind,
-          content: r.content,
-          citations: r.citations ?? [],
-          meta: (r.meta ?? {}) as Record<string, unknown>,
-          flags: r.flags ?? { state: 'active' },
-          createdAt: r.created_at.toISOString(),
-        })),
+        raw: rows.map(toContextItemDebug),
         // 推理视图：投影引擎从原始上下文派生的跨轮历史（user/assistant 文本）。
         llmView: projectForChat(views, HISTORY_CHAR_BUDGET),
         // 用户视图：前端可见聊天记录。

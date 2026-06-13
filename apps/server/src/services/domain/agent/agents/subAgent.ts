@@ -79,6 +79,12 @@ export function buildSubAgentTool(spec: SubAgentToolSpec, deps: { agentRuns: Age
         agentName: spec.name,
         input: task,
       })
+      // 子 run 节点入流（DESIGN §8.9）：前端据 parentRunId 建嵌套、把随后上浮的子 agent
+      // item/patch 归到这条参与方泳道。childCtx 经 spread 继承同一 sink → 子事件自然上浮。
+      ctx.sink?.({
+        type: 'run',
+        node: { id: childRunId, parentRunId: ctx.runId, agentName: spec.name, status: 'running' },
+      })
       const childCtx: RunContext = {
         ...ctx,
         runId: childRunId,

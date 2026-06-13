@@ -1,49 +1,41 @@
 <script setup lang="ts">
-import type { Citation, Message } from '@jnowledge/shared'
-import type { TraceStep } from '@/stores/chat'
+import type { Citation } from '@jnowledge/shared'
+import type { TurnView } from '@/stores/chat'
 import { Sparkles } from 'lucide-vue-next'
 import MessageBubble from '@/components/chat/MessageBubble.vue'
-import StreamingBubble from '@/components/chat/StreamingBubble.vue'
+import AssistantTurn from '@/components/chat/AssistantTurn.vue'
 import { useAutoScroll } from '@/hooks/useAutoScroll'
 
 const props = defineProps<{
-  messages: Message[]
+  turns: TurnView[]
   streaming: boolean
-  streamText: string
-  streamReasoning: string
-  streamCitations: Citation[]
-  streamSteps: TraceStep[]
 }>()
 const emit = defineEmits<{ cite: [citation: Citation] }>()
 
+const last = () => props.turns[props.turns.length - 1]
 const { scroller } = useAutoScroll([
-  () => props.messages.length,
-  () => props.streamText,
-  () => props.streamReasoning,
-  () => props.streamSteps.length,
+  () => props.turns.length,
+  () => last()?.text,
+  () => last()?.reasoning,
+  () => last()?.subAgents.length,
+  () => last()?.subAgents.map((s) => s.text.length + s.reasoning.length).join(','),
 ])
+
+/** 助手回合是否有可渲染内容（空回合——如失败前——不渲染空气泡）。 */
+function hasAssistant(t: TurnView): boolean {
+  return !!(t.text || t.reasoning || t.subAgents.length || t.streaming)
+}
 </script>
 
 <template>
   <div ref="scroller" class="flex-1 overflow-y-auto px-1 py-2">
-    <MessageBubble
-      v-for="m in messages"
-      :key="m.id"
-      :message="m"
-      @cite="emit('cite', $event)"
-    />
-
-    <StreamingBubble
-      v-if="streaming"
-      :text="streamText"
-      :reasoning="streamReasoning"
-      :citations="streamCitations"
-      :steps="streamSteps"
-      @cite="emit('cite', $event)"
-    />
+    <template v-for="t in turns" :key="t.runId">
+      <MessageBubble v-if="t.user" :message="t.user" @cite="emit('cite', $event)" />
+      <AssistantTurn v-if="hasAssistant(t)" :turn="t" @cite="emit('cite', $event)" />
+    </template>
 
     <div
-      v-if="messages.length === 0 && !streaming"
+      v-if="turns.length === 0 && !streaming"
       class="flex flex-col items-center justify-center h-full gap-4 text-white/30 py-16"
     >
       <div

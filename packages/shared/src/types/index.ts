@@ -44,8 +44,15 @@ export type {
   AgentRunNode,
   SystemViewEntry,
   ContextDebug,
+  RawContextStreamEvent,
 } from '../schemas/chat.js'
-export type { AgentRun, AgentStep, AgentAskRequest, AgentStreamEvent } from '../schemas/agent.js'
+export type { AgentRun, AgentStep, AgentAskRequest } from '../schemas/agent.js'
+
+export type {
+  ContextItemView,
+  ContextItemFlags,
+  ContextItemToolCall,
+} from '../projection/userView.js'
 
 export type {
   UserRole,
