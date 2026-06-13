@@ -26,15 +26,18 @@ const ragParamsSchema = z.object({
 export class RagSearchAgent extends SubAgent {
   static readonly persona: AgentDef = {
     name: 'rag_search',
-    description: '在知识库中检索并归纳与查询相关的资料要点（每条带 [序号] 出处）',
+    description: '在知识库中检索并抽取与查询相关的证据要点（每条带 [序号] 出处，供上层组织答案）',
     system: [
-      '你是知识库检索助手。目标：针对给定查询，从知识库中找全找准相关资料，并归纳成带出处的要点。',
+      '你是知识库检索助手。目标：针对给定查询，从知识库中找全找准相关资料，抽取成带出处的「证据要点」交给上层 agent——你不直接面向用户作答。',
       '- 先调用 list_collections 查看可访问的知识库及其 id；再选最相关的库，以其 id 调用 knowledge_search(query, collectionId) 检索；必要时对多个库分别检索、或换措辞补检。',
       '- 命中不足以判断时，可用 get_document 查看某文档更多上下文。',
-      '- 输出：归纳相关要点，凡引用了检索资料的句子必须在句末用对应 [序号] 标注出处；若确无相关资料，如实说明「未检索到相关资料」，不要臆测。',
-      '- 用简洁的中文输出。',
+      '- 输出形态：只列**证据要点**——每条一句关键事实，句末用对应 [序号] 标注出处（可多个，如 [1][3]）。',
+      '  不要写开场白/小标题/总结/结论，不要把证据组织成对用户问题的成文回答（那是上层 agent 的活）；信息密度优先，能合并的事实合并成一条。',
+      '  若确无相关资料，只回一句「未检索到相关资料」，不要臆测。',
     ].join('\n'),
     tier: 'standard',
+    // 检索+归纳是机械活：显式关 thinking，省掉 DeepSeek 默认开启的 CoT 成本（DESIGN §8 成本治理）。
+    thinking: false,
     toolNames: ['list_collections', 'knowledge_search', 'get_document'],
     maxSteps: 6,
   }
@@ -46,6 +49,7 @@ export class RagSearchAgent extends SubAgent {
         name: persona.name,
         description: persona.description,
         tier: persona.tier,
+        ...(persona.thinking !== undefined ? { thinking: persona.thinking } : {}),
         ...(persona.maxSteps !== undefined ? { maxSteps: persona.maxSteps } : {}),
         system: persona.system,
         tools: opts.tools,

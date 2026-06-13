@@ -1,7 +1,7 @@
 import type { z } from 'zod'
 import type { Citation, LlmTier, RawContextStreamEvent } from '@jnowledge/shared'
 import type { Logger } from '../../../logger.js'
-import type { LLMClient, LlmCallStat, ToolCall } from '../llm/types.js'
+import type { LLMClient, LlmCallStat, Thinking, ToolCall } from '../llm/types.js'
 
 export type { LlmCallStat }
 
@@ -57,6 +57,12 @@ export interface AgentDef {
   toolNames: string[]
   /** 最大步数熔断（默认 DEFAULT_MAX_STEPS）。 */
   maxSteps?: number
+  /**
+   * 思考链（thinking/CoT）开关：缺省随模型默认；false=显式关（省 CoT 成本）。
+   * 顶层 assistant 的 thinking 由用户每轮经构造期 opts 决定、不写在 persona；
+   * 检索类子 agent（如 rag_search）属机械活，可在 persona 声明 thinking:false 常关。
+   */
+  thinking?: Thinking
 }
 
 /** 作用域天花板：沿 run 树委派、单调收窄。'principal'=principal 全量可访问库；string[]=收窄到指定库集。 */
