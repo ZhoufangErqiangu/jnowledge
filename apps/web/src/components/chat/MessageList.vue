@@ -52,7 +52,7 @@ const { scroller } = useAutoScroll([
         <Sparkles :size="28" class="text-brand/50" />
       </div>
       <p class="text-sm text-center max-w-xs leading-relaxed">
-        全局助手：自动选择相关知识库检索作答，并标注引用
+        助手：自动选择相关知识库检索作答，并标注引用
       </p>
     </div>
   </div>

@@ -20,7 +20,7 @@ function logout() {
 const navLinks = [
   { label: '知识库', to: '/collections' },
   { label: '搜索', to: '/search' },
-  { label: '全局助手', to: '/chat' },
+  { label: '助手', to: '/chat' },
 ]
 
 function isActive(path: string) {

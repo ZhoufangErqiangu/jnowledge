@@ -20,7 +20,7 @@ const emit = defineEmits<{
     class="flex flex-col h-full bg-surface-dark/60 border border-white/[0.06] rounded-xl overflow-hidden"
   >
     <div class="flex items-center justify-between px-4 py-3 border-b border-white/[0.05] shrink-0">
-      <span class="font-semibold text-sm text-white/80">🌐 全局助手</span>
+      <span class="font-semibold text-sm text-white/80">🌐 助手</span>
       <Button
         variant="ghost"
         size="sm"
