@@ -4,6 +4,7 @@ import type { TurnView } from '@/stores/chat'
 import MarkdownContent from '@/components/MarkdownContent.vue'
 import CitationTags from '@/components/chat/CitationTags.vue'
 import ReasoningPanel from '@/components/chat/ReasoningPanel.vue'
+import ToolTrace from '@/components/chat/ToolTrace.vue'
 
 defineProps<{ turn: TurnView }>()
 const emit = defineEmits<{ cite: [citation: Citation] }>()
@@ -22,6 +23,9 @@ const emit = defineEmits<{ cite: [citation: Citation] }>()
       class="max-w-[76%] rounded-2xl rounded-tl-none px-4 py-3 bg-surface border border-white/[0.07] text-white/90 shadow-md"
     >
       <ReasoningPanel :reasoning="turn.reasoning" />
+
+      <!-- 顶层 agent 自身的工具轨迹（默认折叠） -->
+      <ToolTrace :tools="turn.tools" />
 
       <!-- 顶层终答 -->
       <div v-if="turn.text || !turn.subAgents.length" class="inline mt-1">

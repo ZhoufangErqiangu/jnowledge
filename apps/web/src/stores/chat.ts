@@ -34,6 +34,8 @@ export interface TurnView {
   reasoning: string
   text: string
   citations: Citation[]
+  /** 顶层 agent 自身调的工具（如 list_collections、文档改写）——默认折叠。 */
+  tools: { name: string; ok: boolean; summary: string }[]
   subAgents: SubAgentLane[]
   /** 是否在途（顶层 run 尚无终答且正在流式）——决定光标。 */
   streaming: boolean
@@ -162,6 +164,7 @@ export const useChatStore = defineStore('chat', () => {
         reasoning: top.reasoning,
         text: top.text,
         citations: finalItemOf(R)?.citations ?? [],
+        tools: toolsOf(R),
         subAgents,
         streaming: top.running,
       }
